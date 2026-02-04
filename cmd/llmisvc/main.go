@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -43,6 +44,8 @@ import (
 
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha2"
+	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	"github.com/kserve/kserve/pkg/controller/v1alpha2/llmisvc"
 )
 
@@ -182,6 +185,37 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize ConfigCache for efficient ConfigMap access
+	// Use GetAPIReader() for direct API access to avoid dependency on manager cache during startup
+	setupLog.Info("Initializing ConfigMap cache")
+	configCache := configcache.NewConfigCache(mgr.GetAPIReader(), configcache.Options{
+		ConfigMapName:      constants.InferenceServiceConfigMapName,
+		ConfigMapNamespace: constants.KServeNamespace,
+	})
+
+	// Set up watch to automatically update cache when ConfigMap changes
+	setupLog.Info("Setting up ConfigMap watch for cache")
+	if err := configcache.SetupConfigMapWatch(mgr, configCache, constants.InferenceServiceConfigMapName, constants.KServeNamespace); err != nil {
+		setupLog.Error(err, "unable to setup ConfigMap watch")
+		os.Exit(1)
+	}
+
+	// Start the cache and wait for initial sync before starting controllers
+	setupLog.Info("Starting ConfigMap cache")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := configCache.Start(ctx); err != nil {
+		setupLog.Error(err, "unable to start ConfigMap cache")
+		os.Exit(1)
+	}
+
+	if err := configCache.WaitForCacheSync(ctx); err != nil {
+		setupLog.Error(err, "timeout waiting for ConfigMap cache sync")
+		os.Exit(1)
+	}
+	setupLog.Info("ConfigMap cache initialized successfully")
+
 	// Register v1alpha2 validators
 	v1alpha2LLMValidator := &v1alpha2.LLMInferenceServiceValidator{}
 	if err = v1alpha2LLMValidator.SetupWithManager(mgr); err != nil {
@@ -203,6 +237,7 @@ func main() {
 		Client:        mgr.GetClient(),
 		Clientset:     clientSet,
 		EventRecorder: llmEventBroadcaster.NewRecorder(scheme, corev1.EventSource{Component: "LLMInferenceServiceController"}),
+		ConfigCache:   configCache, // Phase 2: Pass cache for efficient config access
 		Validator: func(ctx context.Context, llmSvc *v1alpha2.LLMInferenceService) error {
 			_, err := v1alpha2LLMValidator.ValidateCreate(ctx, llmSvc)
 			return err
@@ -212,7 +247,7 @@ func main() {
 	}
 
 	v1alpha1ConfigValidator := &v1alpha1.LLMInferenceServiceConfigValidator{
-		ConfigValidationFunc:   createV1Alpha1ConfigValidationFunc(clientSet),
+		ConfigValidationFunc:   createV1Alpha1ConfigValidationFunc(configCache),
 		WellKnownConfigChecker: wellKnownConfigChecker,
 	}
 	if err = v1alpha1ConfigValidator.SetupWithManager(mgr); err != nil {
@@ -221,7 +256,7 @@ func main() {
 	}
 
 	v1alpha2ConfigValidator := &v1alpha2.LLMInferenceServiceConfigValidator{
-		ConfigValidationFunc:   createV1Alpha2ConfigValidationFunc(clientSet),
+		ConfigValidationFunc:   createV1Alpha2ConfigValidationFunc(configCache),
 		WellKnownConfigChecker: wellKnownConfigChecker,
 	}
 	if err = v1alpha2ConfigValidator.SetupWithManager(mgr); err != nil {
@@ -268,30 +303,44 @@ func wellKnownConfigChecker(name string) bool {
 
 // validateLLMISVCConfig validates a v1alpha2 LLMInferenceServiceConfig by loading the controller
 // config and validating the template variables.
-func validateLLMISVCConfig(ctx context.Context, clientSet kubernetes.Interface, config *v1alpha2.LLMInferenceServiceConfig) error {
-	cfg, err := llmisvc.LoadConfig(ctx, clientSet)
+// Phase 2: Updated to use ConfigCache instead of direct API calls
+func validateLLMISVCConfig(ctx context.Context, cache configcache.ConfigCache, config *v1alpha2.LLMInferenceServiceConfig) error {
+	// Load config from cache instead of API server
+	ingressConfig, err := cache.GetIngressConfig()
 	if err != nil {
 		return err
 	}
+	storageInitializerConfig, err := cache.GetStorageInitializerConfig()
+	if err != nil {
+		return err
+	}
+	credentialConfig, err := cache.GetCredentialConfig()
+	if err != nil {
+		return err
+	}
+
+	cfg := llmisvc.NewConfig(ingressConfig, storageInitializerConfig, credentialConfig)
 	_, err = llmisvc.ReplaceVariables(llmisvc.LLMInferenceServiceSample(), config, cfg)
 	return err
 }
 
 // createV1Alpha1ConfigValidationFunc creates a validation function for v1alpha1 LLMInferenceServiceConfig.
 // It converts the config to v1alpha2 and validates using the v1alpha2 llmisvc package.
-func createV1Alpha1ConfigValidationFunc(clientSet kubernetes.Interface) func(ctx context.Context, config *v1alpha1.LLMInferenceServiceConfig) error {
+// Phase 2: Updated to use ConfigCache
+func createV1Alpha1ConfigValidationFunc(cache configcache.ConfigCache) func(ctx context.Context, config *v1alpha1.LLMInferenceServiceConfig) error {
 	return func(ctx context.Context, config *v1alpha1.LLMInferenceServiceConfig) error {
 		v2Config := &v1alpha2.LLMInferenceServiceConfig{}
 		if err := config.ConvertTo(v2Config); err != nil {
 			return err
 		}
-		return validateLLMISVCConfig(ctx, clientSet, v2Config)
+		return validateLLMISVCConfig(ctx, cache, v2Config)
 	}
 }
 
 // createV1Alpha2ConfigValidationFunc creates a validation function for v1alpha2 LLMInferenceServiceConfig.
-func createV1Alpha2ConfigValidationFunc(clientSet kubernetes.Interface) func(ctx context.Context, config *v1alpha2.LLMInferenceServiceConfig) error {
+// Phase 2: Updated to use ConfigCache
+func createV1Alpha2ConfigValidationFunc(cache configcache.ConfigCache) func(ctx context.Context, config *v1alpha2.LLMInferenceServiceConfig) error {
 	return func(ctx context.Context, config *v1alpha2.LLMInferenceServiceConfig) error {
-		return validateLLMISVCConfig(ctx, clientSet, config)
+		return validateLLMISVCConfig(ctx, cache, config)
 	}
 }

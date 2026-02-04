@@ -54,6 +54,7 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	knutils "github.com/kserve/kserve/pkg/controller/v1alpha1/utils"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/components"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers"
@@ -113,6 +114,7 @@ type InferenceServiceReconciler struct {
 	Log          logr.Logger
 	Scheme       *runtime.Scheme
 	Recorder     record.EventRecorder
+	ConfigCache  configcache.ConfigCache // Phase 2: ConfigMap cache for efficient config access
 }
 
 func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

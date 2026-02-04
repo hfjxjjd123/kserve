@@ -21,12 +21,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -90,7 +90,9 @@ type ConfigCache interface {
 
 // cacheImpl is the concrete implementation of ConfigCache
 type cacheImpl struct {
-	client             client.Client
+	// reader is used for direct API reads (non-cached) during startup
+	// This ensures the cache can initialize before the manager's cache starts
+	reader             client.Reader
 	configMapName      string
 	configMapNamespace string
 
@@ -116,9 +118,11 @@ type cacheImpl struct {
 }
 
 // NewConfigCache creates a new ConfigCache instance
-func NewConfigCache(client client.Client, opts Options) ConfigCache {
+// The reader parameter should be mgr.GetAPIReader() to ensure it works before the manager starts.
+// Using mgr.GetClient() will cause startup failures as the manager's cache is not yet running.
+func NewConfigCache(reader client.Reader, opts Options) ConfigCache {
 	c := &cacheImpl{
-		client:             client,
+		reader:             reader,
 		configMapName:      opts.ConfigMapName,
 		configMapNamespace: opts.ConfigMapNamespace,
 	}
@@ -128,19 +132,35 @@ func NewConfigCache(client client.Client, opts Options) ConfigCache {
 
 // Start initializes the cache by loading the ConfigMap
 func (c *cacheImpl) Start(ctx context.Context) error {
-	log.Info("Starting ConfigMap cache", "configMapName", c.configMapName, "namespace", c.configMapNamespace)
+    log.Info("Starting ConfigMap cache (Non-blocking mode)", "configMapName", c.configMapName)
 
-	if err := c.loadConfigMap(ctx); err != nil {
-		return fmt.Errorf("failed to load ConfigMap: %w", err)
-	}
+    go func() {
+        backoff := 3 * time.Second
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            default:
+                if err := c.loadConfigMap(ctx); err != nil {
+                    log.Error(err, "ConfigMap not found or not defined yet", 
+                        "configMapName", c.configMapName, "retryIn", backoff)
+                    
+                    time.Sleep(backoff)
+                    continue
+                }
 
-	c.mu.Lock()
-	c.initialized = true
-	c.initCond.Broadcast()
-	c.mu.Unlock()
+                c.mu.Lock()
+                c.initialized = true
+                c.initCond.Broadcast()
+                c.mu.Unlock()
 
-	log.Info("ConfigMap cache initialized successfully")
-	return nil
+                log.Info("ConfigMap cache initialized successfully")
+                return
+            }
+        }
+    }()
+
+    return nil
 }
 
 // WaitForCacheSync blocks until the cache has been initialized
@@ -165,6 +185,7 @@ func (c *cacheImpl) WaitForCacheSync(ctx context.Context) error {
 }
 
 // loadConfigMap fetches the ConfigMap from the API server and parses all configs atomically
+// Uses the non-cached reader to ensure this works before the manager starts
 func (c *cacheImpl) loadConfigMap(ctx context.Context) error {
 	configMap := &corev1.ConfigMap{}
 	key := client.ObjectKey{
@@ -172,7 +193,7 @@ func (c *cacheImpl) loadConfigMap(ctx context.Context) error {
 		Namespace: c.configMapNamespace,
 	}
 
-	if err := c.client.Get(ctx, key, configMap); err != nil {
+	if err := c.reader.Get(ctx, key, configMap); err != nil {
 		return fmt.Errorf("failed to get ConfigMap: %w", err)
 	}
 
@@ -575,57 +596,92 @@ func (c *cacheImpl) GetAutoscalerConfig() (*v1beta1.AutoscalerConfig, error) {
 }
 
 // SetupConfigMapWatch configures the cache to receive ConfigMap update events
-// TODO: Update for controller-runtime v0.19+ API changes (Phase 2)
-// The Watch API has changed significantly in newer versions - needs to use typed sources/handlers
+// Uses controller-runtime v0.19+ API with builder pattern
 func SetupConfigMapWatch(mgr manager.Manager, cache ConfigCache, configMapName, configMapNamespace string) error {
-	return fmt.Errorf("SetupConfigMapWatch needs to be updated for controller-runtime v0.19+ API (Phase 2 work)")
-	/* COMMENTED OUT - TO BE FIXED IN PHASE 2 with new controller-runtime API
 	cacheImpl, ok := cache.(*cacheImpl)
 	if !ok {
 		return fmt.Errorf("invalid cache implementation")
 	}
 
-	// Create a controller that watches the ConfigMap
-	c, err := controller.New("configmap-cache-watcher", mgr, controller.Options{
-		Reconciler: &noopReconciler{},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create controller: %w", err)
-	}
-
-	// Watch ConfigMap events
-	err = c.Watch(
-		source.Kind(mgr.GetCache(), &corev1.ConfigMap{}),
-		&handler.Funcs{
-			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-				cm := e.ObjectNew.(*corev1.ConfigMap)
-				if cm.Name == configMapName && cm.Namespace == configMapNamespace {
-					cacheImpl.handleConfigMapUpdate(ctx, cm)
-				}
-			},
-			CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
-				cm := e.Object.(*corev1.ConfigMap)
-				if cm.Name == configMapName && cm.Namespace == configMapNamespace {
-					cacheImpl.handleConfigMapUpdate(ctx, cm)
-				}
-			},
+	// Create a predicate to filter only the specific ConfigMap we care about
+	configMapPredicate := predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			cm, ok := e.Object.(*corev1.ConfigMap)
+			if !ok {
+				return false
+			}
+			return cm.Name == configMapName && cm.Namespace == configMapNamespace
 		},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to watch ConfigMap: %w", err)
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			cm, ok := e.ObjectNew.(*corev1.ConfigMap)
+			if !ok {
+				return false
+			}
+			return cm.Name == configMapName && cm.Namespace == configMapNamespace
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			// Don't reconcile on deletes - keep using cached config
+			return false
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return false
+		},
 	}
 
-	log.Info("ConfigMap watch configured", "configMapName", configMapName, "namespace", configMapNamespace)
+	// Create a reconciler that updates the cache when the ConfigMap changes
+	reconciler := &configMapCacheReconciler{
+		client:    mgr.GetClient(),
+		cache:     cacheImpl,
+		cmName:    configMapName,
+		cmNamespace: configMapNamespace,
+	}
+
+	// Use builder pattern to set up the watch
+	err := builder.ControllerManagedBy(mgr).
+		Named("configmap-cache-watcher").
+		For(&corev1.ConfigMap{}, builder.WithPredicates(configMapPredicate)).
+		Complete(reconciler)
+
+	if err != nil {
+		return fmt.Errorf("failed to setup ConfigMap watch: %w", err)
+	}
+
+	log.Info("ConfigMap watch configured successfully", "configMapName", configMapName, "namespace", configMapNamespace)
 	return nil
-	*/
 }
 
-// noopReconciler is a no-op reconciler since we handle events in the watch handler
-// TODO: Remove or update when SetupConfigMapWatch is fixed
-/*
-type noopReconciler struct{}
+// configMapCacheReconciler reconciles the ConfigMap and updates the cache.
+// This reconciler is triggered by the watch when the target ConfigMap changes.
+type configMapCacheReconciler struct {
+	client      client.Client
+	cache       *cacheImpl
+	cmName      string
+	cmNamespace string
+}
 
-func (r *noopReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+// Reconcile updates the cache when the ConfigMap changes.
+// Returns nil error intentionally to avoid requeueing - this allows the system to continue
+// operating with cached config during transient failures (network issues, API server unavailable).
+// Trade-off: Favors system availability over strict config consistency.
+// If the ConfigMap is deleted, the cache retains the last known good configuration.
+func (r *configMapCacheReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	// Only reconcile if it's our target ConfigMap
+	if req.Name != r.cmName || req.Namespace != r.cmNamespace {
+		return reconcile.Result{}, nil
+	}
+
+	log.Info("Reconciling ConfigMap for cache update", "name", req.Name, "namespace", req.Namespace)
+
+	// Fetch the latest ConfigMap
+	configMap := &corev1.ConfigMap{}
+	if err := r.client.Get(ctx, req.NamespacedName, configMap); err != nil {
+		log.Error(err, "Failed to get ConfigMap during reconciliation", "name", req.Name, "namespace", req.Namespace)
+		// Return nil to avoid requeueing - keeps system operational with cached config
+		return reconcile.Result{}, nil
+	}
+
+	// Update the cache
+	r.cache.handleConfigMapUpdate(ctx, configMap)
+
 	return reconcile.Result{}, nil
 }
-*/

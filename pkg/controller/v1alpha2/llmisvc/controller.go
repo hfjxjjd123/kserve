@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/cabundleconfigmap"
 
 	"knative.dev/pkg/reconciler"
@@ -69,7 +70,8 @@ var childResourcesPredicate, _ = predicate.LabelSelectorPredicate(metav1.LabelSe
 type LLMISVCReconciler struct {
 	client.Client
 	record.EventRecorder
-	Clientset kubernetes.Interface
+	Clientset   kubernetes.Interface
+	ConfigCache configcache.ConfigCache // Phase 2: ConfigMap cache for efficient config access
 
 	Validator func(ctx context.Context, llmSvc *v1alpha2.LLMInferenceService) error
 }

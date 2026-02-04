@@ -21,6 +21,7 @@ import (
 	"flag"
 	"net/http"
 	"os"
+	"time"
 
 	kedav1alpha1 "github.com/kedacore/keda/v2/apis/keda/v1alpha1"
 	otelv1beta1 "github.com/open-telemetry/opentelemetry-operator/apis/v1beta1"
@@ -45,6 +46,7 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	graphcontroller "github.com/kserve/kserve/pkg/controller/v1alpha1/inferencegraph"
 	trainedmodelcontroller "github.com/kserve/kserve/pkg/controller/v1alpha1/trainedmodel"
 	"github.com/kserve/kserve/pkg/controller/v1alpha1/trainedmodel/reconcilers/modelconfig"
@@ -159,26 +161,53 @@ func main() {
 		os.Exit(1)
 	}
 
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(context.Background(), clientSet)
-	if err != nil {
-		setupLog.Error(err, "unable to get configmap", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
+	// Initialize ConfigCache for efficient ConfigMap access
+	// Use GetAPIReader() for direct API access to avoid dependency on manager cache during startup
+	setupLog.Info("Initializing ConfigMap cache")
+	configCache := configcache.NewConfigCache(mgr.GetAPIReader(), configcache.Options{
+		ConfigMapName:      constants.InferenceServiceConfigMapName,
+		ConfigMapNamespace: constants.KServeNamespace,
+	})
+
+	// Set up watch to automatically update cache when ConfigMap changes
+	setupLog.Info("Setting up ConfigMap watch for cache")
+	if err := configcache.SetupConfigMapWatch(mgr, configCache, constants.InferenceServiceConfigMapName, constants.KServeNamespace); err != nil {
+		setupLog.Error(err, "unable to setup ConfigMap watch")
 		os.Exit(1)
 	}
-	deployConfig, err := v1beta1.NewDeployConfig(isvcConfigMap)
-	if err != nil {
-		setupLog.Error(err, "unable to get deploy config.")
+
+	// Start the cache and wait for initial sync before starting controllers
+	setupLog.Info("Starting ConfigMap cache")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := configCache.Start(ctx); err != nil {
+		setupLog.Error(err, "unable to start ConfigMap cache")
 		os.Exit(1)
 	}
-	ingressConfig, err := v1beta1.NewIngressConfig(isvcConfigMap)
+
+	if err := configCache.WaitForCacheSync(ctx); err != nil {
+		setupLog.Error(err, "timeout waiting for ConfigMap cache sync")
+		os.Exit(1)
+	}
+	setupLog.Info("ConfigMap cache initialized successfully")
+
+	// Load initial configs from cache for validation
+	deployConfig, err := configCache.GetDeployConfig()
 	if err != nil {
-		setupLog.Error(err, "unable to get ingress config.")
+		setupLog.Error(err, "unable to get deploy config from cache")
+		os.Exit(1)
+	}
+	ingressConfig, err := configCache.GetIngressConfig()
+	if err != nil {
+		setupLog.Error(err, "unable to get ingress config from cache")
 		os.Exit(1)
 	}
 
 	// Update Global GPU Resource Type List when custom GPU resource types are provided
-	_, err = v1beta1.NewMultiNodeConfig(isvcConfigMap)
+	_, err = configCache.GetMultiNodeConfig()
 	if err != nil {
-		setupLog.Error(err, "unable to get multiNode config.")
+		setupLog.Error(err, "unable to get multiNode config from cache")
 		os.Exit(1)
 	}
 
@@ -252,12 +281,12 @@ func main() {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: clientSet.CoreV1().Events("")})
 	if err = (&v1beta1controller.InferenceServiceReconciler{
-		Client:    mgr.GetClient(),
-		Clientset: clientSet,
-		Log:       ctrl.Log.WithName("v1beta1Controllers").WithName("InferenceService"),
-		Scheme:    mgr.GetScheme(),
-		Recorder: eventBroadcaster.NewRecorder(
-			mgr.GetScheme(), corev1.EventSource{Component: "v1beta1Controllers"}),
+		Client:      mgr.GetClient(),
+		Clientset:   clientSet,
+		Log:         ctrl.Log.WithName("v1beta1Controllers").WithName("InferenceService"),
+		Scheme:      mgr.GetScheme(),
+		Recorder:    eventBroadcaster.NewRecorder(mgr.GetScheme(), corev1.EventSource{Component: "v1beta1Controllers"}),
+		ConfigCache: configCache, // Phase 2: Pass cache for efficient config access
 	}).SetupWithManager(mgr, deployConfig, ingressConfig); err != nil {
 		setupLog.Error(err, "unable to create controller", "v1beta1Controller", "InferenceService")
 		os.Exit(1)
@@ -283,11 +312,12 @@ func main() {
 	setupLog.Info("Setting up InferenceGraph controller")
 	inferenceGraphEventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: clientSet.CoreV1().Events("")})
 	if err = (&graphcontroller.InferenceGraphReconciler{
-		Client:    mgr.GetClient(),
-		Clientset: clientSet,
-		Log:       ctrl.Log.WithName("v1alpha1Controllers").WithName("InferenceGraph"),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  eventBroadcaster.NewRecorder(mgr.GetScheme(), corev1.EventSource{Component: "InferenceGraphController"}),
+		Client:      mgr.GetClient(),
+		Clientset:   clientSet,
+		Log:         ctrl.Log.WithName("v1alpha1Controllers").WithName("InferenceGraph"),
+		Scheme:      mgr.GetScheme(),
+		Recorder:    eventBroadcaster.NewRecorder(mgr.GetScheme(), corev1.EventSource{Component: "InferenceGraphController"}),
+		ConfigCache: configCache, // Phase 2: Pass cache for efficient config access
 	}).SetupWithManager(mgr, deployConfig); err != nil {
 		setupLog.Error(err, "unable to create controller", "v1alpha1Controllers", "InferenceGraph")
 		os.Exit(1)

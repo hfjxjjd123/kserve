@@ -49,6 +49,7 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	knutils "github.com/kserve/kserve/pkg/controller/v1alpha1/utils"
 	isvcutils "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/utils"
 	"github.com/kserve/kserve/pkg/utils"
@@ -62,6 +63,7 @@ type InferenceGraphReconciler struct {
 	Log          logr.Logger
 	Scheme       *runtime.Scheme
 	Recorder     record.EventRecorder
+	ConfigCache  configcache.ConfigCache // Phase 2: ConfigMap cache for efficient config access
 }
 
 // InferenceGraphState describes the Readiness of the InferenceGraph
