@@ -36,6 +36,7 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/knative"
 	raw "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/raw"
 	isvcutils "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/utils"
@@ -53,11 +54,13 @@ type Transformer struct {
 	scheme                 *runtime.Scheme
 	inferenceServiceConfig *v1beta1.InferenceServicesConfig
 	deploymentMode         constants.DeploymentModeType
+	configCache            configcache.ConfigCache // Phase 3: Cache for efficient config access
 	Log                    logr.Logger
 }
 
 func NewTransformer(client client.Client, clientset kubernetes.Interface, scheme *runtime.Scheme,
 	inferenceServiceConfig *v1beta1.InferenceServicesConfig, deploymentMode constants.DeploymentModeType,
+	configCache configcache.ConfigCache,
 ) Component {
 	return &Transformer{
 		client:                 client,
@@ -65,6 +68,7 @@ func NewTransformer(client client.Client, clientset kubernetes.Interface, scheme
 		scheme:                 scheme,
 		inferenceServiceConfig: inferenceServiceConfig,
 		deploymentMode:         deploymentMode,
+		configCache:            configCache,
 		Log:                    ctrl.Log.WithName("TransformerReconciler"),
 	}
 }
@@ -187,14 +191,16 @@ func (p *Transformer) Reconcile(ctx context.Context, isvc *v1beta1.InferenceServ
 }
 
 func (p *Transformer) reconcileTransformerRawDeployment(ctx context.Context, isvc *v1beta1.InferenceService, objectMeta *metav1.ObjectMeta, podSpec *corev1.PodSpec) error {
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(ctx, p.clientset)
+	// Phase 3: Get configs from cache instead of direct API calls
+	storageInitializerConfig, err := p.configCache.GetStorageInitializerConfig()
 	if err != nil {
-		return errors.Wrapf(err, "failed to get InferenceService ConfigMap")
+		return errors.Wrapf(err, "failed to get StorageInitializer config from cache")
 	}
 
-	storageInitializerConfig, err := v1beta1.GetStorageInitializerConfigs(isvcConfigMap)
+	// Get raw ConfigMap for credential builder (until credentials package is updated to use cache)
+	isvcConfigMap, err := p.configCache.Get(ctx)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get StorageInitializer config")
+		return errors.Wrapf(err, "failed to get InferenceService ConfigMap from cache")
 	}
 
 	modelStorageSpec := isvc.Spec.Predictor.GetImplementation().GetStorageSpec()
@@ -214,7 +220,7 @@ func (p *Transformer) reconcileTransformerRawDeployment(ctx context.Context, isv
 	}
 
 	r, err := raw.NewRawKubeReconciler(ctx, p.client, p.clientset, p.scheme, *objectMeta, metav1.ObjectMeta{},
-		&isvc.Spec.Transformer.ComponentExtensionSpec, podSpec, nil, &isvc.Spec.Transformer.StorageUris, storageInitializerConfig, storageSpec, credentialBuilder, storageContainerSpec)
+		&isvc.Spec.Transformer.ComponentExtensionSpec, podSpec, nil, &isvc.Spec.Transformer.StorageUris, storageInitializerConfig, storageSpec, credentialBuilder, storageContainerSpec, p.configCache)
 	if err != nil {
 		return errors.Wrapf(err, "fails to create NewRawKubeReconciler for transformer")
 	}
@@ -243,14 +249,16 @@ func (p *Transformer) reconcileTransformerRawDeployment(ctx context.Context, isv
 }
 
 func (p *Transformer) reconcileTransformerKnativeDeployment(ctx context.Context, isvc *v1beta1.InferenceService, objectMeta *metav1.ObjectMeta, podSpec *corev1.PodSpec) error {
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(ctx, p.clientset)
+	// Phase 3: Get configs from cache instead of direct API calls
+	storageInitializerConfig, err := p.configCache.GetStorageInitializerConfig()
 	if err != nil {
-		return errors.Wrapf(err, "failed to get InferenceService ConfigMap")
+		return errors.Wrapf(err, "failed to get StorageInitializer config from cache")
 	}
 
-	storageInitializerConfig, err := v1beta1.GetStorageInitializerConfigs(isvcConfigMap)
+	// Get raw ConfigMap for credential builder (until credentials package is updated to use cache)
+	isvcConfigMap, err := p.configCache.Get(ctx)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get StorageInitializer config")
+		return errors.Wrapf(err, "failed to get InferenceService ConfigMap from cache")
 	}
 
 	modelStorageSpec := isvc.Spec.Predictor.GetImplementation().GetStorageSpec()

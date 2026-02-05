@@ -23,6 +23,7 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/autoscaler"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/ingress"
@@ -69,11 +70,13 @@ func NewRawKubeReconciler(ctx context.Context,
 	storageSpec *v1beta1.StorageSpec,
 	credentialBuilder *credentials.CredentialBuilder,
 	storageContainerSpec *v1alpha1.StorageContainerSpec,
+	configCache configcache.ConfigCache,
 ) (*RawKubeReconciler, error) {
 	var otelCollector *otel.OtelReconciler
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(ctx, clientset)
+	// Phase 3: Use ConfigCache instead of direct API call to reduce latency
+	isvcConfigMap, err := configCache.Get(ctx)
 	if err != nil {
-		log.Error(err, "unable to get configmap", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
+		log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
 		return nil, err
 	}
 	// create OTel Collector if pod metrics is enabled for auto-scaling

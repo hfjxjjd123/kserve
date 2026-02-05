@@ -148,9 +148,10 @@ func (r *InferenceGraphReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	forceStopRuntime := utils.GetForceStopRuntime(graph)
 
-	configMap, err := r.Clientset.CoreV1().ConfigMaps(constants.KServeNamespace).Get(ctx, constants.InferenceServiceConfigMapName, metav1.GetOptions{})
+	// Phase 3: Get ConfigMap from cache instead of direct API call
+	configMap, err := r.ConfigCache.Get(ctx)
 	if err != nil {
-		r.Log.Error(err, "Failed to find config map", "name", constants.InferenceServiceConfigMapName)
+		r.Log.Error(err, "Failed to get config map from cache", "name", constants.InferenceServiceConfigMapName)
 		return reconcile.Result{}, err
 	}
 	routerConfig, err := getRouterConfigs(configMap)
@@ -184,21 +185,18 @@ func (r *InferenceGraphReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(ctx, r.Clientset)
+	// Phase 3: Get DeployConfig from cache instead of direct API call
+	deployConfig, err := r.ConfigCache.GetDeployConfig()
 	if err != nil {
-		r.Log.Error(err, "unable to get configmap", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
-		return reconcile.Result{}, err
-	}
-	deployConfig, err := v1beta1.NewDeployConfig(isvcConfigMap)
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "fails to create DeployConfig")
+		r.Log.Error(err, "unable to get DeployConfig from cache")
+		return reconcile.Result{}, errors.Wrapf(err, "fails to get DeployConfig from cache")
 	}
 
 	deploymentMode := isvcutils.GetDeploymentMode(graph.Status.DeploymentMode, graph.ObjectMeta.Annotations, deployConfig)
 	r.Log.Info("Inference graph deployment ", "deployment mode ", deploymentMode)
 	if deploymentMode == constants.Standard {
 		// Create inference graph resources such as deployment, service, hpa in raw deployment mode
-		deployment, url, err := handleInferenceGraphRawDeployment(ctx, r.Client, r.Clientset, r.Scheme, graph, routerConfig)
+		deployment, url, err := handleInferenceGraphRawDeployment(ctx, r.Client, r.Clientset, r.Scheme, graph, routerConfig, r.ConfigCache)
 		if err != nil {
 			return ctrl.Result{}, errors.Wrapf(err, "fails to reconcile inference graph raw deployment")
 		}

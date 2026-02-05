@@ -25,6 +25,7 @@ import (
 
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	"github.com/kserve/kserve/pkg/credentials"
 	"github.com/kserve/kserve/pkg/types"
 )
@@ -89,4 +90,28 @@ func LoadConfig(ctx context.Context, clientset kubernetes.Interface) (*Config, e
 	}
 
 	return NewConfig(ingressConfig, storageInitializerConfig, &credentialConfig), nil
+}
+
+// LoadConfigFromCache loads configuration from the ConfigCache
+// This replaces LoadConfig to eliminate direct API calls during reconciliation
+// Phase 3: Controller Integration - uses in-memory cache for sub-millisecond config access
+func LoadConfigFromCache(ctx context.Context, cache configcache.ConfigCache) (*Config, error) {
+	// Get configs from cache instead of making API calls
+	ingressConfig, err := cache.GetIngressConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get IngressConfig from cache: %w", err)
+	}
+
+	storageInitializerConfig, err := cache.GetStorageInitializerConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get StorageInitializerConfig from cache: %w", err)
+	}
+
+	credentialConfig, err := cache.GetCredentialConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get CredentialConfig from cache: %w", err)
+	}
+
+	// Use the same NewConfig function to aggregate configs
+	return NewConfig(ingressConfig, storageInitializerConfig, credentialConfig), nil
 }

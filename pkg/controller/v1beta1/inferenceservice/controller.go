@@ -129,14 +129,23 @@ func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return reconcile.Result{}, err
 	}
 
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(ctx, r.Clientset)
+	// Phase 3: Use ConfigCache instead of direct API calls to reduce reconciliation latency
+	isvcConfig, err := r.ConfigCache.GetInferenceServicesConfig()
 	if err != nil {
-		r.Log.Error(err, "unable to get configmap", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
-		return reconcile.Result{}, err
+		r.Log.Error(err, "unable to get InferenceServicesConfig from cache")
+		return reconcile.Result{}, errors.Wrapf(err, "fails to get InferenceServicesConfig from cache")
 	}
-	isvcConfig, err := v1beta1.NewInferenceServicesConfig(isvcConfigMap)
+
+	deployConfig, err := r.ConfigCache.GetDeployConfig()
 	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "fails to create InferenceServicesConfig")
+		r.Log.Error(err, "unable to get DeployConfig from cache")
+		return reconcile.Result{}, errors.Wrapf(err, "fails to get DeployConfig from cache")
+	}
+
+	ingressConfig, err := r.ConfigCache.GetIngressConfig()
+	if err != nil {
+		r.Log.Error(err, "unable to get IngressConfig from cache")
+		return reconcile.Result{}, errors.Wrapf(err, "fails to get IngressConfig from cache")
 	}
 
 	// get annotations from isvc
@@ -144,11 +153,6 @@ func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return !utils.Includes(isvcConfig.ServiceAnnotationDisallowedList, key)
 	})
 	forceStopRuntime := utils.GetForceStopRuntime(isvc)
-
-	deployConfig, err := v1beta1.NewDeployConfig(isvcConfigMap)
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "fails to create DeployConfig")
-	}
 
 	deploymentMode := isvcutils.GetDeploymentMode(isvc.Status.DeploymentMode, annotations, deployConfig)
 	r.Log.Info("Inference service deployment mode ", "deployment mode ", deploymentMode)
@@ -238,20 +242,20 @@ func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	r.Log.Info("Reconciling inference service", "apiVersion", isvc.APIVersion, "isvc", isvc.Name, "namespace", isvc.Namespace)
 
 	// Reconcile cabundleConfigMap
-	caBundleConfigMapReconciler := cabundleconfigmap.NewCaBundleConfigMapReconciler(r.Client, r.Clientset)
+	caBundleConfigMapReconciler := cabundleconfigmap.NewCaBundleConfigMapReconciler(r.Client, r.Clientset, r.ConfigCache)
 	if err := caBundleConfigMapReconciler.Reconcile(ctx, isvc.Namespace); err != nil {
 		return reconcile.Result{}, err
 	}
 
 	componentReconcilers := []components.Component{}
 	if deploymentMode != constants.ModelMeshDeployment {
-		componentReconcilers = append(componentReconcilers, components.NewPredictor(r.Client, r.Clientset, r.Scheme, isvcConfig, deploymentMode))
+		componentReconcilers = append(componentReconcilers, components.NewPredictor(r.Client, r.Clientset, r.Scheme, isvcConfig, deploymentMode, r.ConfigCache))
 	}
 	if isvc.Spec.Transformer != nil {
-		componentReconcilers = append(componentReconcilers, components.NewTransformer(r.Client, r.Clientset, r.Scheme, isvcConfig, deploymentMode))
+		componentReconcilers = append(componentReconcilers, components.NewTransformer(r.Client, r.Clientset, r.Scheme, isvcConfig, deploymentMode, r.ConfigCache))
 	}
 	if isvc.Spec.Explainer != nil {
-		componentReconcilers = append(componentReconcilers, components.NewExplainer(r.Client, r.Clientset, r.Scheme, isvcConfig, deploymentMode))
+		componentReconcilers = append(componentReconcilers, components.NewExplainer(r.Client, r.Clientset, r.Scheme, isvcConfig, deploymentMode, r.ConfigCache))
 	}
 	for _, reconciler := range componentReconcilers {
 		result, err := reconciler.Reconcile(ctx, isvc)
@@ -315,12 +319,7 @@ func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			isvc.Status.PropagateCrossComponentStatus(componentList, v1beta1.LatestDeploymentReady)
 		}
 	}
-	// Reconcile ingress
-	ingressConfig, err := v1beta1.NewIngressConfig(isvcConfigMap)
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "fails to create IngressConfig")
-	}
-
+	// Reconcile ingress (ingressConfig already fetched from cache at the beginning)
 	// Reconcile ingress using factory
 	factory := reconcilers.NewReconcilerFactory()
 

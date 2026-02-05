@@ -143,7 +143,7 @@ func (r *LLMISVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Reconcile cabundleConfigMap
-	caBundleConfigMapReconciler := cabundleconfigmap.NewCaBundleConfigMapReconciler(r.Client, r.Clientset)
+	caBundleConfigMapReconciler := cabundleconfigmap.NewCaBundleConfigMapReconciler(r.Client, r.Clientset, r.ConfigCache)
 	if err := caBundleConfigMapReconciler.Reconcile(ctx, original.Namespace); err != nil {
 		return reconcile.Result{}, err
 	}
@@ -175,11 +175,11 @@ func (r *LLMISVCReconciler) reconcile(ctx context.Context, llmSvc *v1alpha2.LLMI
 	logger := log.FromContext(ctx).WithName("reconcile")
 	ctx = log.IntoContext(ctx, logger)
 
-	// Load global configuration from KServe configmap
-	// TODO(ctrl): add watch on CfgMap with predicate and cache tuning to trigger reconcile when it changes
-	config, configErr := LoadConfig(ctx, r.Clientset)
+	// Load global configuration from ConfigCache (Phase 3: eliminates API calls during reconciliation)
+	// ConfigMap watch is set up in manager to automatically update cache
+	config, configErr := LoadConfigFromCache(ctx, r.ConfigCache)
 	if configErr != nil {
-		return fmt.Errorf("failed to load ingress config: %w", configErr)
+		return fmt.Errorf("failed to load config from cache: %w", configErr)
 	}
 
 	// Combine base configurations with service-specific overrides
@@ -297,9 +297,9 @@ func (r *LLMISVCReconciler) enqueueOnGatewayChange(logger logr.Logger) handler.E
 
 		listNamespace := corev1.NamespaceAll
 
-		cfg, err := LoadConfig(ctx, r.Clientset)
+		cfg, err := LoadConfigFromCache(ctx, r.ConfigCache)
 		if err != nil {
-			logger.Error(err, "Failed to load config")
+			logger.Error(err, "Failed to load config from cache")
 			return reqs
 		}
 
@@ -367,9 +367,9 @@ func (r *LLMISVCReconciler) enqueueOnHttpRouteChange(logger logr.Logger) handler
 
 		listNamespace := corev1.NamespaceAll
 
-		cfg, err := LoadConfig(ctx, r.Clientset)
+		cfg, err := LoadConfigFromCache(ctx, r.ConfigCache)
 		if err != nil {
-			logger.Error(err, "Failed to load config")
+			logger.Error(err, "Failed to load config from cache")
 			return reqs
 		}
 
@@ -482,9 +482,9 @@ func (r *LLMISVCReconciler) enqueueOnConfigMapChange(logger logr.Logger) handler
 
 		listNamespace := sub.GetNamespace()
 
-		cfg, err := LoadConfig(ctx, r.Clientset)
+		cfg, err := LoadConfigFromCache(ctx, r.ConfigCache)
 		if err != nil {
-			logger.Error(err, "Failed to load config")
+			logger.Error(err, "Failed to load config from cache")
 			return reqs
 		}
 

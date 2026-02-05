@@ -40,6 +40,7 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/knative"
 	modelconfig "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/modelconfig"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/raw"
@@ -64,11 +65,13 @@ type Predictor struct {
 	scheme                 *runtime.Scheme
 	inferenceServiceConfig *v1beta1.InferenceServicesConfig
 	deploymentMode         constants.DeploymentModeType
+	configCache            configcache.ConfigCache // Phase 3: Cache for efficient config access
 	Log                    logr.Logger
 }
 
 func NewPredictor(client client.Client, clientset kubernetes.Interface, scheme *runtime.Scheme,
 	inferenceServiceConfig *v1beta1.InferenceServicesConfig, deploymentMode constants.DeploymentModeType,
+	configCache configcache.ConfigCache,
 ) Component {
 	return &Predictor{
 		client:                 client,
@@ -76,6 +79,7 @@ func NewPredictor(client client.Client, clientset kubernetes.Interface, scheme *
 		scheme:                 scheme,
 		inferenceServiceConfig: inferenceServiceConfig,
 		deploymentMode:         deploymentMode,
+		configCache:            configCache,
 		Log:                    ctrl.Log.WithName("PredictorReconciler"),
 	}
 }
@@ -677,14 +681,16 @@ func computeRayNodeAndGPUs(mergedWorkerPodSpec *corev1.PodSpec, totalRequestGPUC
 }
 
 func (p *Predictor) reconcileRawDeployment(ctx context.Context, isvc *v1beta1.InferenceService, objectMeta, workerObjectMeta metav1.ObjectMeta, podSpec, workerPodSpec *corev1.PodSpec) error {
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(ctx, p.clientset)
+	// Phase 3: Get configs from cache instead of direct API calls
+	storageInitializerConfig, err := p.configCache.GetStorageInitializerConfig()
 	if err != nil {
-		return errors.Wrapf(err, "failed to get InferenceService ConfigMap")
+		return errors.Wrapf(err, "failed to get StorageInitializer config from cache")
 	}
 
-	storageInitializerConfig, err := v1beta1.GetStorageInitializerConfigs(isvcConfigMap)
+	// Get raw ConfigMap for credential builder (until credentials package is updated to use cache)
+	isvcConfigMap, err := p.configCache.Get(ctx)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get StorageInitializer config")
+		return errors.Wrapf(err, "failed to get InferenceService ConfigMap from cache")
 	}
 
 	modelStorageSpec := isvc.Spec.Predictor.GetImplementation().GetStorageSpec()
@@ -704,7 +710,7 @@ func (p *Predictor) reconcileRawDeployment(ctx context.Context, isvc *v1beta1.In
 	}
 
 	r, err := raw.NewRawKubeReconciler(ctx, p.client, p.clientset, p.scheme, objectMeta, workerObjectMeta, &isvc.Spec.Predictor.ComponentExtensionSpec,
-		podSpec, workerPodSpec, &isvc.Spec.Predictor.StorageUris, storageInitializerConfig, storageSpec, credentialBuilder, storageContainerSpec)
+		podSpec, workerPodSpec, &isvc.Spec.Predictor.StorageUris, storageInitializerConfig, storageSpec, credentialBuilder, storageContainerSpec, p.configCache)
 	if err != nil {
 		return errors.Wrapf(err, "fails to create NewRawKubeReconciler for predictor")
 	}
@@ -742,14 +748,16 @@ func (p *Predictor) reconcileRawDeployment(ctx context.Context, isvc *v1beta1.In
 }
 
 func (p *Predictor) reconcileKnativeDeployment(ctx context.Context, isvc *v1beta1.InferenceService, objectMeta *metav1.ObjectMeta, podSpec *corev1.PodSpec) (*knservingv1.ServiceStatus, error) {
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(ctx, p.clientset)
+	// Phase 3: Get configs from cache instead of direct API calls
+	storageInitializerConfig, err := p.configCache.GetStorageInitializerConfig()
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get InferenceService ConfigMap")
+		return nil, errors.Wrapf(err, "failed to get StorageInitializer config from cache")
 	}
 
-	storageInitializerConfig, err := v1beta1.GetStorageInitializerConfigs(isvcConfigMap)
+	// Get raw ConfigMap for credential builder (until credentials package is updated to use cache)
+	isvcConfigMap, err := p.configCache.Get(ctx)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get StorageInitializer config")
+		return nil, errors.Wrapf(err, "failed to get InferenceService ConfigMap from cache")
 	}
 
 	modelStorageSpec := isvc.Spec.Predictor.GetImplementation().GetStorageSpec()

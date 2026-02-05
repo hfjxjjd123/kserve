@@ -52,15 +52,17 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	controllerutils "github.com/kserve/kserve/pkg/controller/v1alpha1/utils"
 	"github.com/kserve/kserve/pkg/utils"
 )
 
 type LocalModelReconciler struct {
 	client.Client
-	Clientset *kubernetes.Clientset
-	Log       logr.Logger
-	Scheme    *runtime.Scheme
+	Clientset   *kubernetes.Clientset
+	Log         logr.Logger
+	Scheme      *runtime.Scheme
+	ConfigCache configcache.ConfigCache // Phase 3: Cache for efficient config access
 }
 
 var (
@@ -234,9 +236,10 @@ func (c *LocalModelReconciler) ReconcileForIsvcs(ctx context.Context, localModel
 // Step 4 - Creates PV & PVCs for namespaces with isvcs using this cached model
 func (c *LocalModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	c.Log.Info("Reconciling localmodel", "name", req.Name)
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(ctx, c.Clientset)
+	// Phase 3: Use ConfigCache instead of direct API call to reduce latency
+	isvcConfigMap, err := c.ConfigCache.Get(ctx)
 	if err != nil {
-		c.Log.Error(err, "unable to get configmap", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
+		c.Log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
 		return reconcile.Result{}, err
 	}
 	localModelConfig, err := v1beta1.NewLocalModelConfig(isvcConfigMap)
@@ -392,9 +395,10 @@ func (c *LocalModelReconciler) localmodelNodeFunc(ctx context.Context, obj clien
 }
 
 func (c *LocalModelReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(context.Background(), c.Clientset)
+	// Phase 3: Use ConfigCache instead of direct API call to reduce latency
+	isvcConfigMap, err := c.ConfigCache.Get(context.Background())
 	if err != nil {
-		c.Log.Error(err, "unable to get configmap", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
+		c.Log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
 		return err
 	}
 	localModelConfig, err := v1beta1.NewLocalModelConfig(isvcConfigMap)

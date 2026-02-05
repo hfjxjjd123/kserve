@@ -81,6 +81,9 @@ type ConfigCache interface {
 	// GetAutoscalerConfig returns the parsed autoscaler configuration
 	GetAutoscalerConfig() (*v1beta1.AutoscalerConfig, error)
 
+	// Get returns the raw ConfigMap for cases where controllers need direct access
+	Get(ctx context.Context) (*corev1.ConfigMap, error)
+
 	// WaitForCacheSync blocks until the cache has been initialized
 	WaitForCacheSync(ctx context.Context) error
 
@@ -98,6 +101,9 @@ type cacheImpl struct {
 
 	// Mutex for thread-safe access to cached configs
 	mu sync.RWMutex
+
+	// Raw ConfigMap for controllers that need direct access
+	configMap *corev1.ConfigMap
 
 	// Pre-parsed configurations (single parse, many reads)
 	ingressConfig              *v1beta1.IngressConfig
@@ -262,6 +268,7 @@ func (c *cacheImpl) parseAndUpdateConfigs(ctx context.Context, configMap *corev1
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.configMap = configMap
 	c.ingressConfig = ingressConfig
 	c.deployConfig = deployConfig
 	c.inferenceServicesConfig = inferenceServicesConfig
@@ -593,6 +600,21 @@ func (c *cacheImpl) GetAutoscalerConfig() (*v1beta1.AutoscalerConfig, error) {
 		return nil, fmt.Errorf("cache not initialized")
 	}
 	return deepCopyAutoscalerConfig(c.autoscalerConfig), nil
+}
+
+func (c *cacheImpl) Get(ctx context.Context) (*corev1.ConfigMap, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.initialized {
+		return nil, fmt.Errorf("cache not initialized")
+	}
+
+	if c.configMap == nil {
+		return nil, fmt.Errorf("configMap is nil")
+	}
+
+	return c.configMap.DeepCopy(), nil
 }
 
 // SetupConfigMapWatch configures the cache to receive ConfigMap update events

@@ -33,28 +33,32 @@ import (
 
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	"github.com/kserve/kserve/pkg/types"
 )
 
 var log = logf.Log.WithName("CaBundleConfigMapReconciler")
 
 type CaBundleConfigMapReconciler struct {
-	client    client.Client
-	clientset kubernetes.Interface
+	client      client.Client
+	clientset   kubernetes.Interface
+	configCache configcache.ConfigCache // Phase 3: Cache for efficient config access
 }
 
-func NewCaBundleConfigMapReconciler(client client.Client, clientset kubernetes.Interface) *CaBundleConfigMapReconciler {
+func NewCaBundleConfigMapReconciler(client client.Client, clientset kubernetes.Interface, configCache configcache.ConfigCache) *CaBundleConfigMapReconciler {
 	return &CaBundleConfigMapReconciler{
-		client:    client,
-		clientset: clientset,
+		client:      client,
+		clientset:   clientset,
+		configCache: configCache,
 	}
 }
 
 func (c *CaBundleConfigMapReconciler) Reconcile(ctx context.Context, namespace string) error {
 	log.Info("Reconciling CaBundleConfigMap", "namespace", namespace)
-	isvcConfigMap, err := v1beta1.GetInferenceServiceConfigMap(ctx, c.clientset)
+	// Phase 3: Use ConfigCache instead of direct API call to reduce latency
+	isvcConfigMap, err := c.configCache.Get(ctx)
 	if err != nil {
-		log.Error(err, "unable to get configmap", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
+		log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
 		return err
 	}
 

@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -35,6 +36,7 @@ import (
 
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
+	"github.com/kserve/kserve/pkg/controller/configcache"
 	localmodelnodecontroller "github.com/kserve/kserve/pkg/controller/v1alpha1/localmodelnode"
 )
 
@@ -132,15 +134,35 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Phase 3: Initialize ConfigCache for efficient ConfigMap access
+	setupLog.Info("Initializing ConfigMap cache")
+	configCache := configcache.New()
+
+	// Load initial ConfigMap using direct API reader (not cached client)
+	// This avoids dependency on manager cache before it starts
+	ctx := context.Background()
+	if err := configCache.Start(ctx, mgr.GetAPIReader()); err != nil {
+		setupLog.Error(err, "Failed to initialize ConfigMap cache")
+		os.Exit(1)
+	}
+
+	// Set up watch to keep cache synchronized with ConfigMap changes
+	if err := configcache.SetupConfigMapWatch(mgr, configCache); err != nil {
+		setupLog.Error(err, "Failed to setup ConfigMap watch")
+		os.Exit(1)
+	}
+	setupLog.Info("ConfigMap cache initialized and watch configured")
+
 	// Setup LocalModelNode controller
 	localModelNodeEventBroadcaster := record.NewBroadcaster()
 	setupLog.Info("Setting up v1alpha1 LocalModelNode controller")
 	localModelNodeEventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: clientSet.CoreV1().Events("")})
 	if err = (&localmodelnodecontroller.LocalModelNodeReconciler{
-		Client:    mgr.GetClient(),
-		Clientset: clientSet,
-		Log:       ctrl.Log.WithName("v1alpha1Controllers").WithName("LocalModelNode"),
-		Scheme:    mgr.GetScheme(),
+		Client:      mgr.GetClient(),
+		Clientset:   clientSet,
+		Log:         ctrl.Log.WithName("v1alpha1Controllers").WithName("LocalModelNode"),
+		Scheme:      mgr.GetScheme(),
+		ConfigCache: configCache,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "v1alpha1Controllers", "LocalModelNode")
 		os.Exit(1)
