@@ -47351,6 +47351,11 @@ spec:
                         type: object
                     type: object
                 type: object
+              storageInitializer:
+                properties:
+                  enabled:
+                    type: boolean
+                type: object
               template:
                 properties:
                   activeDeadlineSeconds:
@@ -67890,6 +67895,11 @@ spec:
                             x-kubernetes-list-type: map
                         type: object
                     type: object
+                type: object
+              storageInitializer:
+                properties:
+                  enabled:
+                    type: boolean
                 type: object
               template:
                 properties:
@@ -88536,6 +88546,11 @@ spec:
                             x-kubernetes-list-type: map
                         type: object
                     type: object
+                type: object
+              storageInitializer:
+                properties:
+                  enabled:
+                    type: boolean
                 type: object
               template:
                 properties:
@@ -109233,6 +109248,11 @@ spec:
                             x-kubernetes-list-type: map
                         type: object
                     type: object
+                type: object
+              storageInitializer:
+                properties:
+                  enabled:
+                    type: boolean
                 type: object
               template:
                 properties:
