@@ -114,7 +114,7 @@ type InferenceServiceReconciler struct {
 	Log          logr.Logger
 	Scheme       *runtime.Scheme
 	Recorder     record.EventRecorder
-	ConfigCache  configcache.ConfigCache // Phase 2: ConfigMap cache for efficient config access
+	ConfigCache  configcache.ConfigCache
 }
 
 func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -129,7 +129,6 @@ func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return reconcile.Result{}, err
 	}
 
-	// Phase 3: Use ConfigCache instead of direct API calls to reduce reconciliation latency
 	isvcConfig, err := r.ConfigCache.GetInferenceServicesConfig()
 	if err != nil {
 		r.Log.Error(err, "unable to get InferenceServicesConfig from cache")
@@ -514,6 +513,38 @@ func (r *InferenceServiceReconciler) podInitContainersFunc(ctx context.Context, 
 	return nil
 }
 
+func (r *InferenceServiceReconciler) inferenceServiceConfigMapFunc(ctx context.Context, obj client.Object) []reconcile.Request {
+	cm, ok := obj.(*corev1.ConfigMap)
+	if !ok || cm == nil {
+		return nil
+	}
+
+	var isvcList v1beta1.InferenceServiceList
+	// List all InferenceServices across all namespaces
+	if err := r.Client.List(ctx, &isvcList); err != nil {
+		r.Log.Error(err, "unable to list InferenceServices for ConfigMap change", "configMap", cm.Name)
+		return nil
+	}
+
+	requests := make([]reconcile.Request, 0, len(isvcList.Items))
+	for _, isvc := range isvcList.Items {
+		annotations := isvc.GetAnnotations()
+		if annotations != nil {
+			if disableAutoUpdate, found := annotations[constants.DisableAutoUpdateAnnotationKey]; found && disableAutoUpdate == "true" && isvc.Status.IsReady() {
+				r.Log.Info("Auto-update is disabled for InferenceService", "InferenceService", isvc.Name)
+				continue
+			}
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: isvc.Namespace,
+				Name:      isvc.Name,
+			},
+		})
+	}
+	return requests
+}
+
 // servingRuntimesPredicate returns a predicate that filters ServingRuntime updates
 // to only include those where the Spec has changed.
 func servingRuntimesPredicate() predicate.Funcs {
@@ -667,6 +698,7 @@ func (r *InferenceServiceReconciler) SetupWithManager(mgr ctrl.Manager, deployCo
 	return ctrlBuilder.Watches(&v1alpha1.ServingRuntime{}, handler.EnqueueRequestsFromMapFunc(r.servingRuntimeFunc), builder.WithPredicates(servingRuntimesPredicate())).
 		Watches(&v1alpha1.ClusterServingRuntime{}, handler.EnqueueRequestsFromMapFunc(r.clusterServingRuntimeFunc), builder.WithPredicates(clusterServingRuntimesPredicate())).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.podInitContainersFunc), builder.WithPredicates(podInitContainersPredicate())).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.inferenceServiceConfigMapFunc), builder.WithPredicates(configcache.InferenceServiceConfigPredicate(constants.InferenceServiceConfigMapName, constants.KServeNamespace))).
 		Complete(r)
 }
 

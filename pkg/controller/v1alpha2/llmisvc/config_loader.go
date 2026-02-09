@@ -92,9 +92,7 @@ func LoadConfig(ctx context.Context, clientset kubernetes.Interface) (*Config, e
 	return NewConfig(ingressConfig, storageInitializerConfig, &credentialConfig), nil
 }
 
-// LoadConfigFromCache loads configuration from the ConfigCache
-// This replaces LoadConfig to eliminate direct API calls during reconciliation
-// Phase 3: Controller Integration - uses in-memory cache for sub-millisecond config access
+// LoadConfigFromCache loads configuration from the ConfigCache instead of direct API calls
 func LoadConfigFromCache(ctx context.Context, cache configcache.ConfigCache) (*Config, error) {
 	// Get configs from cache instead of making API calls
 	ingressConfig, err := cache.GetIngressConfig()

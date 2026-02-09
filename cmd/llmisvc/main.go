@@ -21,7 +21,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -185,36 +184,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize ConfigCache for efficient ConfigMap access
-	// Use GetAPIReader() for direct API access to avoid dependency on manager cache during startup
-	setupLog.Info("Initializing ConfigMap cache")
-	configCache := configcache.NewConfigCache(mgr.GetAPIReader(), configcache.Options{
+	// Setup ConfigCache: performs initial load + registers with manager
+	// Lifecycle coupling is enforced - the cache will automatically receive updates after mgr.Start()
+	setupLog.Info("Setting up ConfigMap cache")
+	configCache, err := configcache.SetupConfigCache(mgr, configcache.Options{
 		ConfigMapName:      constants.InferenceServiceConfigMapName,
 		ConfigMapNamespace: constants.KServeNamespace,
 	})
-
-	// Set up watch to automatically update cache when ConfigMap changes
-	setupLog.Info("Setting up ConfigMap watch for cache")
-	if err := configcache.SetupConfigMapWatch(mgr, configCache, constants.InferenceServiceConfigMapName, constants.KServeNamespace); err != nil {
-		setupLog.Error(err, "unable to setup ConfigMap watch")
+	if err != nil {
+		setupLog.Error(err, "unable to setup ConfigMap cache")
 		os.Exit(1)
 	}
-
-	// Start the cache and wait for initial sync before starting controllers
-	setupLog.Info("Starting ConfigMap cache")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := configCache.Start(ctx); err != nil {
-		setupLog.Error(err, "unable to start ConfigMap cache")
-		os.Exit(1)
-	}
-
-	if err := configCache.WaitForCacheSync(ctx); err != nil {
-		setupLog.Error(err, "timeout waiting for ConfigMap cache sync")
-		os.Exit(1)
-	}
-	setupLog.Info("ConfigMap cache initialized successfully")
 
 	// Register v1alpha2 validators
 	v1alpha2LLMValidator := &v1alpha2.LLMInferenceServiceValidator{}
@@ -237,7 +217,7 @@ func main() {
 		Client:        mgr.GetClient(),
 		Clientset:     clientSet,
 		EventRecorder: llmEventBroadcaster.NewRecorder(scheme, corev1.EventSource{Component: "LLMInferenceServiceController"}),
-		ConfigCache:   configCache, // Phase 2: Pass cache for efficient config access
+		ConfigCache:   configCache,
 		Validator: func(ctx context.Context, llmSvc *v1alpha2.LLMInferenceService) error {
 			_, err := v1alpha2LLMValidator.ValidateCreate(ctx, llmSvc)
 			return err
@@ -303,7 +283,6 @@ func wellKnownConfigChecker(name string) bool {
 
 // validateLLMISVCConfig validates a v1alpha2 LLMInferenceServiceConfig by loading the controller
 // config and validating the template variables.
-// Phase 2: Updated to use ConfigCache instead of direct API calls
 func validateLLMISVCConfig(ctx context.Context, cache configcache.ConfigCache, config *v1alpha2.LLMInferenceServiceConfig) error {
 	// Load config from cache instead of API server
 	ingressConfig, err := cache.GetIngressConfig()
@@ -326,7 +305,6 @@ func validateLLMISVCConfig(ctx context.Context, cache configcache.ConfigCache, c
 
 // createV1Alpha1ConfigValidationFunc creates a validation function for v1alpha1 LLMInferenceServiceConfig.
 // It converts the config to v1alpha2 and validates using the v1alpha2 llmisvc package.
-// Phase 2: Updated to use ConfigCache
 func createV1Alpha1ConfigValidationFunc(cache configcache.ConfigCache) func(ctx context.Context, config *v1alpha1.LLMInferenceServiceConfig) error {
 	return func(ctx context.Context, config *v1alpha1.LLMInferenceServiceConfig) error {
 		v2Config := &v1alpha2.LLMInferenceServiceConfig{}
@@ -338,7 +316,6 @@ func createV1Alpha1ConfigValidationFunc(cache configcache.ConfigCache) func(ctx 
 }
 
 // createV1Alpha2ConfigValidationFunc creates a validation function for v1alpha2 LLMInferenceServiceConfig.
-// Phase 2: Updated to use ConfigCache
 func createV1Alpha2ConfigValidationFunc(cache configcache.ConfigCache) func(ctx context.Context, config *v1alpha2.LLMInferenceServiceConfig) error {
 	return func(ctx context.Context, config *v1alpha2.LLMInferenceServiceConfig) error {
 		return validateLLMISVCConfig(ctx, cache, config)

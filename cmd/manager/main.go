@@ -17,11 +17,9 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"flag"
 	"net/http"
 	"os"
-	"time"
 
 	kedav1alpha1 "github.com/kedacore/keda/v2/apis/keda/v1alpha1"
 	otelv1beta1 "github.com/open-telemetry/opentelemetry-operator/apis/v1beta1"
@@ -161,36 +159,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize ConfigCache for efficient ConfigMap access
-	// Use GetAPIReader() for direct API access to avoid dependency on manager cache during startup
-	setupLog.Info("Initializing ConfigMap cache")
-	configCache := configcache.NewConfigCache(mgr.GetAPIReader(), configcache.Options{
+	// Setup ConfigCache: performs initial load + registers with manager
+	// Lifecycle coupling is enforced - the cache will automatically receive updates after mgr.Start()
+	setupLog.Info("Setting up ConfigMap cache")
+	configCache, err := configcache.SetupConfigCache(mgr, configcache.Options{
 		ConfigMapName:      constants.InferenceServiceConfigMapName,
 		ConfigMapNamespace: constants.KServeNamespace,
 	})
-
-	// Set up watch to automatically update cache when ConfigMap changes
-	setupLog.Info("Setting up ConfigMap watch for cache")
-	if err := configcache.SetupConfigMapWatch(mgr, configCache, constants.InferenceServiceConfigMapName, constants.KServeNamespace); err != nil {
-		setupLog.Error(err, "unable to setup ConfigMap watch")
+	if err != nil {
+		setupLog.Error(err, "unable to setup ConfigMap cache")
 		os.Exit(1)
 	}
-
-	// Start the cache and wait for initial sync before starting controllers
-	setupLog.Info("Starting ConfigMap cache")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := configCache.Start(ctx); err != nil {
-		setupLog.Error(err, "unable to start ConfigMap cache")
-		os.Exit(1)
-	}
-
-	if err := configCache.WaitForCacheSync(ctx); err != nil {
-		setupLog.Error(err, "timeout waiting for ConfigMap cache sync")
-		os.Exit(1)
-	}
-	setupLog.Info("ConfigMap cache initialized successfully")
 
 	// Load initial configs from cache for validation
 	deployConfig, err := configCache.GetDeployConfig()
@@ -286,7 +265,7 @@ func main() {
 		Log:         ctrl.Log.WithName("v1beta1Controllers").WithName("InferenceService"),
 		Scheme:      mgr.GetScheme(),
 		Recorder:    eventBroadcaster.NewRecorder(mgr.GetScheme(), corev1.EventSource{Component: "v1beta1Controllers"}),
-		ConfigCache: configCache, // Phase 2: Pass cache for efficient config access
+		ConfigCache: configCache,
 	}).SetupWithManager(mgr, deployConfig, ingressConfig); err != nil {
 		setupLog.Error(err, "unable to create controller", "v1beta1Controller", "InferenceService")
 		os.Exit(1)
@@ -317,7 +296,7 @@ func main() {
 		Log:         ctrl.Log.WithName("v1alpha1Controllers").WithName("InferenceGraph"),
 		Scheme:      mgr.GetScheme(),
 		Recorder:    eventBroadcaster.NewRecorder(mgr.GetScheme(), corev1.EventSource{Component: "InferenceGraphController"}),
-		ConfigCache: configCache, // Phase 2: Pass cache for efficient config access
+		ConfigCache: configCache,
 	}).SetupWithManager(mgr, deployConfig); err != nil {
 		setupLog.Error(err, "unable to create controller", "v1alpha1Controllers", "InferenceGraph")
 		os.Exit(1)

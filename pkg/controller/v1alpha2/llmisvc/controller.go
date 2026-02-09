@@ -72,7 +72,7 @@ type LLMISVCReconciler struct {
 	client.Client
 	record.EventRecorder
 	Clientset   kubernetes.Interface
-	ConfigCache configcache.ConfigCache // Phase 2: ConfigMap cache for efficient config access
+	ConfigCache configcache.ConfigCache
 
 	Validator func(ctx context.Context, llmSvc *v1alpha2.LLMInferenceService) error
 
@@ -181,8 +181,6 @@ func (r *LLMISVCReconciler) reconcile(ctx context.Context, llmSvc *v1alpha2.LLMI
 	logger := log.FromContext(ctx).WithName("reconcile")
 	ctx = log.IntoContext(ctx, logger)
 
-	// Load global configuration from ConfigCache (Phase 3: eliminates API calls during reconciliation)
-	// ConfigMap watch is set up in manager to automatically update cache
 	config, configErr := LoadConfigFromCache(ctx, r.ConfigCache)
 	if configErr != nil {
 		return fmt.Errorf("failed to load config from cache: %w", configErr)
@@ -496,6 +494,26 @@ func (r *LLMISVCReconciler) enqueueOnConfigMapChange(logger logr.Logger) handler
 		sub := object.(*corev1.ConfigMap)
 		reqs := make([]reconcile.Request, 0)
 
+		// Handle inferenceservice-config ConfigMap changes
+		// When this ConfigMap changes, all LLMInferenceServices need to re-reconcile
+		if sub.Name == constants.InferenceServiceConfigMapName && sub.Namespace == constants.KServeNamespace {
+			llmSvcList := &v1alpha2.LLMInferenceServiceList{}
+			if err := r.Client.List(ctx, llmSvcList); err != nil {
+				logger.Error(err, "Failed to list LLMInferenceService for inferenceservice-config change")
+				return reqs
+			}
+
+			for _, llmSvc := range llmSvcList.Items {
+				reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{
+					Namespace: llmSvc.Namespace,
+					Name:      llmSvc.Name,
+				}})
+			}
+
+			return reqs
+		}
+
+		// Handle scheduler-config ConfigMap changes
 		listNamespace := sub.GetNamespace()
 
 		cfg, err := LoadConfigFromCache(ctx, r.ConfigCache)

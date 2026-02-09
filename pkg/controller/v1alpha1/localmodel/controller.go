@@ -62,7 +62,7 @@ type LocalModelReconciler struct {
 	Clientset   *kubernetes.Clientset
 	Log         logr.Logger
 	Scheme      *runtime.Scheme
-	ConfigCache configcache.ConfigCache // Phase 3: Cache for efficient config access
+	ConfigCache configcache.ConfigCache
 }
 
 var (
@@ -236,7 +236,6 @@ func (c *LocalModelReconciler) ReconcileForIsvcs(ctx context.Context, localModel
 // Step 4 - Creates PV & PVCs for namespaces with isvcs using this cached model
 func (c *LocalModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	c.Log.Info("Reconciling localmodel", "name", req.Name)
-	// Phase 3: Use ConfigCache instead of direct API call to reduce latency
 	isvcConfigMap, err := c.ConfigCache.Get(ctx)
 	if err != nil {
 		c.Log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
@@ -395,7 +394,6 @@ func (c *LocalModelReconciler) localmodelNodeFunc(ctx context.Context, obj clien
 }
 
 func (c *LocalModelReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Phase 3: Use ConfigCache instead of direct API call to reduce latency
 	isvcConfigMap, err := c.ConfigCache.Get(context.Background())
 	if err != nil {
 		c.Log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)

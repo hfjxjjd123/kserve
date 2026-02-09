@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"flag"
 	"os"
 
@@ -36,6 +35,7 @@ import (
 
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
+	"github.com/kserve/kserve/pkg/constants"
 	"github.com/kserve/kserve/pkg/controller/configcache"
 	localmodelnodecontroller "github.com/kserve/kserve/pkg/controller/v1alpha1/localmodelnode"
 )
@@ -134,24 +134,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Phase 3: Initialize ConfigCache for efficient ConfigMap access
-	setupLog.Info("Initializing ConfigMap cache")
-	configCache := configcache.New()
-
-	// Load initial ConfigMap using direct API reader (not cached client)
-	// This avoids dependency on manager cache before it starts
-	ctx := context.Background()
-	if err := configCache.Start(ctx, mgr.GetAPIReader()); err != nil {
-		setupLog.Error(err, "Failed to initialize ConfigMap cache")
+	// Setup ConfigCache: performs initial load + registers with manager
+	// Lifecycle coupling is enforced - the cache will automatically receive updates after mgr.Start()
+	setupLog.Info("Setting up ConfigMap cache")
+	configCache, err := configcache.SetupConfigCache(mgr, configcache.Options{
+		ConfigMapName:      constants.InferenceServiceConfigMapName,
+		ConfigMapNamespace: constants.KServeNamespace,
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to setup ConfigMap cache")
 		os.Exit(1)
 	}
-
-	// Set up watch to keep cache synchronized with ConfigMap changes
-	if err := configcache.SetupConfigMapWatch(mgr, configCache); err != nil {
-		setupLog.Error(err, "Failed to setup ConfigMap watch")
-		os.Exit(1)
-	}
-	setupLog.Info("ConfigMap cache initialized and watch configured")
 
 	// Setup LocalModelNode controller
 	localModelNodeEventBroadcaster := record.NewBroadcaster()

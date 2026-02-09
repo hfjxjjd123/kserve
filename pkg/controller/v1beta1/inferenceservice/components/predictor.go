@@ -65,7 +65,7 @@ type Predictor struct {
 	scheme                 *runtime.Scheme
 	inferenceServiceConfig *v1beta1.InferenceServicesConfig
 	deploymentMode         constants.DeploymentModeType
-	configCache            configcache.ConfigCache // Phase 3: Cache for efficient config access
+	configCache            configcache.ConfigCache
 	Log                    logr.Logger
 }
 
@@ -681,7 +681,6 @@ func computeRayNodeAndGPUs(mergedWorkerPodSpec *corev1.PodSpec, totalRequestGPUC
 }
 
 func (p *Predictor) reconcileRawDeployment(ctx context.Context, isvc *v1beta1.InferenceService, objectMeta, workerObjectMeta metav1.ObjectMeta, podSpec, workerPodSpec *corev1.PodSpec) error {
-	// Phase 3: Get configs from cache instead of direct API calls
 	storageInitializerConfig, err := p.configCache.GetStorageInitializerConfig()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get StorageInitializer config from cache")
@@ -748,7 +747,6 @@ func (p *Predictor) reconcileRawDeployment(ctx context.Context, isvc *v1beta1.In
 }
 
 func (p *Predictor) reconcileKnativeDeployment(ctx context.Context, isvc *v1beta1.InferenceService, objectMeta *metav1.ObjectMeta, podSpec *corev1.PodSpec) (*knservingv1.ServiceStatus, error) {
-	// Phase 3: Get configs from cache instead of direct API calls
 	storageInitializerConfig, err := p.configCache.GetStorageInitializerConfig()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get StorageInitializer config from cache")

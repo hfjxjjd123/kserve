@@ -73,7 +73,6 @@ func NewReconcilerFactory() *ReconcilerFactory {
 }
 
 // CreateWorkloadReconciler creates the appropriate workload reconciler
-// Phase 1: Only supports Deployment (RawDeployment, Standard)
 func (f *ReconcilerFactory) CreateWorkloadReconciler(
 	ctx context.Context,
 	deploymentMode constants.DeploymentModeType,
@@ -96,7 +95,6 @@ func (f *ReconcilerFactory) CreateWorkloadReconciler(
 }
 
 // CreateServiceReconciler creates the appropriate service reconciler
-// Phase 1: Only supports standard ServiceReconciler
 func (f *ReconcilerFactory) CreateServiceReconciler(
 	deploymentMode constants.DeploymentModeType,
 	params ServiceReconcilerParams,

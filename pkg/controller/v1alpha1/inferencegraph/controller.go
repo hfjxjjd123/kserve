@@ -63,7 +63,7 @@ type InferenceGraphReconciler struct {
 	Log          logr.Logger
 	Scheme       *runtime.Scheme
 	Recorder     record.EventRecorder
-	ConfigCache  configcache.ConfigCache // Phase 2: ConfigMap cache for efficient config access
+	ConfigCache  configcache.ConfigCache
 }
 
 // InferenceGraphState describes the Readiness of the InferenceGraph
@@ -148,7 +148,6 @@ func (r *InferenceGraphReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	forceStopRuntime := utils.GetForceStopRuntime(graph)
 
-	// Phase 3: Get ConfigMap from cache instead of direct API call
 	configMap, err := r.ConfigCache.Get(ctx)
 	if err != nil {
 		r.Log.Error(err, "Failed to get config map from cache", "name", constants.InferenceServiceConfigMapName)
@@ -185,7 +184,6 @@ func (r *InferenceGraphReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	// Phase 3: Get DeployConfig from cache instead of direct API call
 	deployConfig, err := r.ConfigCache.GetDeployConfig()
 	if err != nil {
 		r.Log.Error(err, "unable to get DeployConfig from cache")

@@ -60,7 +60,7 @@ type LocalModelNodeReconciler struct {
 	Clientset   *kubernetes.Clientset
 	Log         logr.Logger
 	Scheme      *runtime.Scheme
-	ConfigCache configcache.ConfigCache // Phase 3: Cache for efficient config access
+	ConfigCache configcache.ConfigCache
 }
 
 const (
@@ -429,7 +429,6 @@ func (c *LocalModelNodeReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// 3. Kick off download jobs for all models in spec
-	// Phase 3: Use ConfigCache instead of direct API call to reduce latency
 	isvcConfigMap, err := c.ConfigCache.Get(ctx)
 	if err != nil {
 		c.Log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)

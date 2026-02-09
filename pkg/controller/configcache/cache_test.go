@@ -26,9 +26,7 @@ import (
 	"github.com/kserve/kserve/pkg/types"
 )
 
-// TestDeepCopyIsolation verifies that deep copy functions provide true isolation
-// and that modifying returned configs doesn't affect the original.
-// This test is critical for preventing data races in the cache.
+// TestDeepCopyIsolation verifies that modifying returned configs doesn't affect the original.
 func TestDeepCopyIsolation(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -161,7 +159,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 				dst.GCS.GCSCredentialFileName = "modified-gcs.json"
 				dst.StorageSpecSecretName = "modified-secret"
 
-				// Verify original is unchanged (critical for nested structs!)
+				// Verify original is unchanged
 				if src.S3.S3AccessKeyIDName != "access-key" {
 					t.Errorf("Original S3.S3AccessKeyIDName was modified: got %s, want access-key", src.S3.S3AccessKeyIDName)
 				}
@@ -259,7 +257,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 			},
 		},
 		{
-			name: "OtelCollectorConfig isolation (uses generated DeepCopy)",
+			name: "OtelCollectorConfig isolation",
 			testFunc: func(t *testing.T) {
 				src := &v1beta1.OtelCollectorConfig{
 					ScrapeInterval:         "30s",
@@ -286,7 +284,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 			},
 		},
 		{
-			name: "AutoscalerConfig isolation (uses generated DeepCopy)",
+			name: "AutoscalerConfig isolation",
 			testFunc: func(t *testing.T) {
 				src := &v1beta1.AutoscalerConfig{
 					ScaleUpStabilizationWindowSeconds:   "60",
@@ -386,7 +384,6 @@ func TestJSONDeepCopy(t *testing.T) {
 			t.Errorf("jsonDeepCopy didn't copy field correctly: got %v, want true", dst.AutoMountServiceAccountToken)
 		}
 
-		// Verify isolation
 		dst.AutoMountServiceAccountToken = false
 		if src.AutoMountServiceAccountToken != true {
 			t.Errorf("jsonDeepCopy didn't provide isolation")
@@ -403,16 +400,11 @@ func TestJSONDeepCopy(t *testing.T) {
 }
 
 // TestJSONDeepCopyHandlesComplexTypes verifies that JSON deep copy handles
-// the types of fields that might be added in the future (pointers, slices, maps)
-// This is the CRITICAL test that proves our fix prevents the "time bomb" vulnerability.
+// complex types (pointers, slices, maps, nested structs).
 func TestJSONDeepCopyHandlesComplexTypes(t *testing.T) {
-	// Mock config struct that simulates what SecurityConfig/ServiceConfig COULD become
 	type FutureConfig struct {
-		// Current fields (simple types)
-		SimpleField bool
-		StringField string
-
-		// Future fields that could be added (complex types)
+		SimpleField       bool
+		StringField       string
 		PointerField      *string
 		SliceField        []string
 		MapField          map[string]string
@@ -433,11 +425,11 @@ func TestJSONDeepCopyHandlesComplexTypes(t *testing.T) {
 			t.Fatalf("jsonDeepCopy failed: %v", err)
 		}
 
-		// Critical test: modifying dst shouldn't affect src
+		// Modifying dst must not affect src
 		*dst.PointerField = "modified"
 
 		if *src.PointerField != "original" {
-			t.Errorf("VULNERABILITY: Pointer field was shared! Original was modified: got %s, want original", *src.PointerField)
+			t.Errorf("deep copy failed:Pointer field was shared! Original was modified: got %s, want original", *src.PointerField)
 		}
 	})
 
@@ -451,15 +443,15 @@ func TestJSONDeepCopyHandlesComplexTypes(t *testing.T) {
 			t.Fatalf("jsonDeepCopy failed: %v", err)
 		}
 
-		// Critical test: modifying dst slice shouldn't affect src
+		// Modifying dst slice must not affect src
 		dst.SliceField[0] = "modified"
 		dst.SliceField = append(dst.SliceField, "new-item")
 
 		if src.SliceField[0] != "item1" {
-			t.Errorf("VULNERABILITY: Slice was shared! Original was modified: got %s, want item1", src.SliceField[0])
+			t.Errorf("deep copy failed:Slice was shared! Original was modified: got %s, want item1", src.SliceField[0])
 		}
 		if len(src.SliceField) != 3 {
-			t.Errorf("VULNERABILITY: Slice was shared! Original length changed: got %d, want 3", len(src.SliceField))
+			t.Errorf("deep copy failed:Slice was shared! Original length changed: got %d, want 3", len(src.SliceField))
 		}
 	})
 
@@ -476,15 +468,15 @@ func TestJSONDeepCopyHandlesComplexTypes(t *testing.T) {
 			t.Fatalf("jsonDeepCopy failed: %v", err)
 		}
 
-		// Critical test: modifying dst map shouldn't affect src
+		// Modifying dst map must not affect src
 		dst.MapField["key1"] = "modified"
 		dst.MapField["key3"] = "new-value"
 
 		if src.MapField["key1"] != "value1" {
-			t.Errorf("VULNERABILITY: Map was shared! Original was modified: got %s, want value1", src.MapField["key1"])
+			t.Errorf("deep copy failed:Map was shared! Original was modified: got %s, want value1", src.MapField["key1"])
 		}
 		if _, exists := src.MapField["key3"]; exists {
-			t.Errorf("VULNERABILITY: Map was shared! New key appeared in original")
+			t.Errorf("deep copy failed:Map was shared! New key appeared in original")
 		}
 	})
 
@@ -505,21 +497,20 @@ func TestJSONDeepCopyHandlesComplexTypes(t *testing.T) {
 			t.Fatalf("jsonDeepCopy failed: %v", err)
 		}
 
-		// Critical test: modifying nested fields shouldn't affect src
+		// Modifying nested fields must not affect src
 		*dst.NestedStructField.InnerPointer = 999
 		dst.NestedStructField.InnerSlice[0] = "modified"
 
 		if *src.NestedStructField.InnerPointer != 42 {
-			t.Errorf("VULNERABILITY: Nested pointer was shared! Original was modified: got %d, want 42", *src.NestedStructField.InnerPointer)
+			t.Errorf("deep copy failed:Nested pointer was shared! Original was modified: got %d, want 42", *src.NestedStructField.InnerPointer)
 		}
 		if src.NestedStructField.InnerSlice[0] != "nested1" {
-			t.Errorf("VULNERABILITY: Nested slice was shared! Original was modified: got %s, want nested1", src.NestedStructField.InnerSlice[0])
+			t.Errorf("deep copy failed:Nested slice was shared! Original was modified: got %s, want nested1", src.NestedStructField.InnerSlice[0])
 		}
 	})
 }
 
-// TestShallowCopyRegression verifies that we're NOT doing shallow copies
-// This test would FAIL with the original vulnerable implementation
+// TestShallowCopyRegression verifies that deep copy functions return new pointers, not shallow copies.
 func TestShallowCopyRegression(t *testing.T) {
 	t.Run("SecurityConfig is not shallow copied", func(t *testing.T) {
 		// Create a config that WOULD have a problem with shallow copy if it had pointers
@@ -532,7 +523,7 @@ func TestShallowCopyRegression(t *testing.T) {
 		// This test verifies we get different memory addresses
 		// If shallow copied, dst == src (same pointer)
 		if dst == src {
-			t.Errorf("VULNERABILITY: deepCopySecurityConfig returned same pointer (shallow copy)!")
+			t.Errorf("deep copy failed:deepCopySecurityConfig returned same pointer (shallow copy)!")
 		}
 
 		// Verify we can modify dst without affecting src
@@ -550,7 +541,7 @@ func TestShallowCopyRegression(t *testing.T) {
 		dst := deepCopyServiceConfig(src)
 
 		if dst == src {
-			t.Errorf("VULNERABILITY: deepCopyServiceConfig returned same pointer (shallow copy)!")
+			t.Errorf("deep copy failed:deepCopyServiceConfig returned same pointer (shallow copy)!")
 		}
 
 		dst.ServiceClusterIPNone = false
@@ -569,21 +560,20 @@ func TestShallowCopyRegression(t *testing.T) {
 		dst := deepCopyCredentialConfig(src)
 
 		if dst == src {
-			t.Errorf("VULNERABILITY: deepCopyCredentialConfig returned same pointer (shallow copy)!")
+			t.Errorf("deep copy failed:deepCopyCredentialConfig returned same pointer (shallow copy)!")
 		}
 
 		// Critical: verify nested struct is also deep copied
 		dst.S3.S3AccessKeyIDName = "modified-key"
 		if src.S3.S3AccessKeyIDName != "original-key" {
-			t.Errorf("CRITICAL VULNERABILITY: Nested S3Config was shallow copied! Original was modified")
+			t.Errorf("deep copy failed: nested S3Config was shallow copied, original was modified")
 		}
 	})
 }
 
-// TestDeepCopyMethodVerification verifies we're using the correct deep copy approach
-// for each config type. This catches if someone accidentally reverts to shallow copy.
+// TestDeepCopyMethodVerification verifies the generated DeepCopy methods work correctly.
 func TestDeepCopyMethodVerification(t *testing.T) {
-	t.Run("OtelCollectorConfig uses generated DeepCopy", func(t *testing.T) {
+	t.Run("OtelCollectorConfig isolation", func(t *testing.T) {
 		src := &v1beta1.OtelCollectorConfig{
 			ScrapeInterval: "30s",
 			Resource: v1beta1.ResourceConfig{
@@ -593,19 +583,17 @@ func TestDeepCopyMethodVerification(t *testing.T) {
 
 		dst := deepCopyOtelCollectorConfig(src)
 
-		// Verify it's using generated DeepCopy by checking it handles nested struct
 		dst.Resource.CPULimit = "2"
 		if src.Resource.CPULimit != "1" {
-			t.Errorf("Generated DeepCopy failed to isolate nested struct")
+			t.Errorf("deep copy failed to isolate nested struct")
 		}
 
-		// Verify it's not the same pointer
 		if dst == src {
 			t.Errorf("deepCopyOtelCollectorConfig returned same pointer")
 		}
 	})
 
-	t.Run("AutoscalerConfig uses generated DeepCopy", func(t *testing.T) {
+	t.Run("AutoscalerConfig isolation", func(t *testing.T) {
 		src := &v1beta1.AutoscalerConfig{
 			ScaleUpStabilizationWindowSeconds: "60",
 		}
@@ -614,7 +602,7 @@ func TestDeepCopyMethodVerification(t *testing.T) {
 
 		dst.ScaleUpStabilizationWindowSeconds = "120"
 		if src.ScaleUpStabilizationWindowSeconds != "60" {
-			t.Errorf("Generated DeepCopy failed")
+			t.Errorf("deep copy failed")
 		}
 
 		if dst == src {

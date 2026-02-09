@@ -73,7 +73,6 @@ func NewRawKubeReconciler(ctx context.Context,
 	configCache configcache.ConfigCache,
 ) (*RawKubeReconciler, error) {
 	var otelCollector *otel.OtelReconciler
-	// Phase 3: Use ConfigCache instead of direct API call to reduce latency
 	isvcConfigMap, err := configCache.Get(ctx)
 	if err != nil {
 		log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)

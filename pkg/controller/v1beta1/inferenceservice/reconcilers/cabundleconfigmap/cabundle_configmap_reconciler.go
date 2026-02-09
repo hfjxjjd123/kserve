@@ -42,7 +42,7 @@ var log = logf.Log.WithName("CaBundleConfigMapReconciler")
 type CaBundleConfigMapReconciler struct {
 	client      client.Client
 	clientset   kubernetes.Interface
-	configCache configcache.ConfigCache // Phase 3: Cache for efficient config access
+	configCache configcache.ConfigCache
 }
 
 func NewCaBundleConfigMapReconciler(client client.Client, clientset kubernetes.Interface, configCache configcache.ConfigCache) *CaBundleConfigMapReconciler {
@@ -55,7 +55,6 @@ func NewCaBundleConfigMapReconciler(client client.Client, clientset kubernetes.I
 
 func (c *CaBundleConfigMapReconciler) Reconcile(ctx context.Context, namespace string) error {
 	log.Info("Reconciling CaBundleConfigMap", "namespace", namespace)
-	// Phase 3: Use ConfigCache instead of direct API call to reduce latency
 	isvcConfigMap, err := c.configCache.Get(ctx)
 	if err != nil {
 		log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
