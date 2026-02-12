@@ -20,9 +20,10 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	kcache "k8s.io/client-go/tools/cache"
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -43,6 +44,12 @@ type Options struct {
 }
 
 // ConfigCache provides thread-safe access to parsed ConfigMap configurations.
+// All typed getters return deep copies — callers may safely mutate returned values.
+//
+// Lifecycle methods (Start, WaitForCacheSync) are intentionally excluded from this
+// interface: Start satisfies manager.Runnable and is called by the manager internally;
+// WaitForCacheSync is not needed by controllers since SetupConfigCache performs the
+// initial load synchronously before returning.
 type ConfigCache interface {
 	GetIngressConfig() (*v1beta1.IngressConfig, error)
 	GetDeployConfig() (*v1beta1.DeployConfig, error)
@@ -55,9 +62,10 @@ type ConfigCache interface {
 	GetMultiNodeConfig() (*v1beta1.MultiNodeConfig, error)
 	GetOtelCollectorConfig() (*v1beta1.OtelCollectorConfig, error)
 	GetAutoscalerConfig() (*v1beta1.AutoscalerConfig, error)
+	// Get returns a deep copy of the raw ConfigMap.
+	// TODO: Remove once CredentialBuilder is updated to accept CredentialConfig directly,
+	// eliminating the need for raw ConfigMap access. See: pkg/credentials package.
 	Get(ctx context.Context) (*corev1.ConfigMap, error)
-	WaitForCacheSync(ctx context.Context) error
-	Start(ctx context.Context) error
 }
 
 type cacheImpl struct {
@@ -81,7 +89,7 @@ type cacheImpl struct {
 	autoscalerConfig           *v1beta1.AutoscalerConfig
 
 	initialized bool
-	initCond    *sync.Cond
+	initDone    chan struct{}
 }
 
 // SetupConfigCache creates and registers a ConfigCache with the manager.
@@ -97,17 +105,25 @@ func SetupConfigCache(mgr manager.Manager, opts Options) (ConfigCache, error) {
 		mgrCache:           mgr.GetCache(),
 		configMapName:      opts.ConfigMapName,
 		configMapNamespace: opts.ConfigMapNamespace,
+		initDone:           make(chan struct{}),
 	}
-	c.initCond = sync.NewCond(&c.mu)
 
 	// Step 1: Initial load via API reader — direct API call, safe before mgr.Start()
+	// NotFound is tolerated: the informer OnAdd will populate the cache when the ConfigMap is created.
+	// Other errors (network, RBAC) are fatal since they won't self-heal.
 	cm := &corev1.ConfigMap{}
 	key := client.ObjectKey{Name: opts.ConfigMapName, Namespace: opts.ConfigMapNamespace}
 	if err := mgr.GetAPIReader().Get(context.Background(), key, cm); err != nil {
-		return nil, fmt.Errorf("failed to read ConfigMap %s/%s: %w", opts.ConfigMapNamespace, opts.ConfigMapName, err)
-	}
-	if err := c.parseAndUpdateConfigs(context.Background(), cm); err != nil {
-		return nil, fmt.Errorf("failed to parse ConfigMap: %w", err)
+		if apierrors.IsNotFound(err) {
+			log.Info("ConfigMap not found at startup, will initialize via informer watch",
+				"configMapName", opts.ConfigMapName, "namespace", opts.ConfigMapNamespace)
+		} else {
+			return nil, fmt.Errorf("failed to read ConfigMap %s/%s: %w", opts.ConfigMapNamespace, opts.ConfigMapName, err)
+		}
+	} else {
+		if err := c.parseAndUpdateConfigs(context.Background(), cm); err != nil {
+			return nil, fmt.Errorf("failed to parse ConfigMap: %w", err)
+		}
 	}
 
 	// Step 2: Register with manager for ongoing updates (enforces lifecycle coupling)
@@ -155,24 +171,11 @@ func (c *cacheImpl) Start(ctx context.Context) error {
 }
 
 func (c *cacheImpl) WaitForCacheSync(ctx context.Context) error {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		c.mu.RLock()
-		initialized := c.initialized
-		c.mu.RUnlock()
-
-		if initialized {
-			return nil
-		}
-
-		select {
-		case <-ticker.C:
-			continue
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for cache sync: %w", ctx.Err())
-		}
+	select {
+	case <-c.initDone:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("timeout waiting for cache sync: %w", ctx.Err())
 	}
 }
 
@@ -235,7 +238,7 @@ func (c *cacheImpl) parseAndUpdateConfigs(ctx context.Context, configMap *corev1
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.configMap = configMap
+	c.configMap = configMap.DeepCopy()
 	c.ingressConfig = ingressConfig
 	c.deployConfig = deployConfig
 	c.inferenceServicesConfig = inferenceServicesConfig
@@ -250,7 +253,7 @@ func (c *cacheImpl) parseAndUpdateConfigs(ctx context.Context, configMap *corev1
 
 	if !c.initialized {
 		c.initialized = true
-		c.initCond.Broadcast()
+		close(c.initDone)
 		log.Info("ConfigMap cache initialized")
 	}
 
@@ -259,6 +262,13 @@ func (c *cacheImpl) parseAndUpdateConfigs(ctx context.Context, configMap *corev1
 }
 
 func (c *cacheImpl) handleConfigMapUpdate(ctx context.Context, cm *corev1.ConfigMap) {
+	c.mu.RLock()
+	if c.configMap != nil && c.configMap.ResourceVersion == cm.ResourceVersion {
+		c.mu.RUnlock()
+		return
+	}
+	c.mu.RUnlock()
+
 	log.Info("ConfigMap update detected, refreshing cache", "configMapName", cm.Name)
 
 	if err := c.parseAndUpdateConfigs(ctx, cm); err != nil {
@@ -459,18 +469,24 @@ func (h *configMapCacheEventHandler) OnUpdate(oldObj, newObj interface{}) {
 func (h *configMapCacheEventHandler) OnDelete(obj interface{}) {
 	cm, ok := obj.(*corev1.ConfigMap)
 	if !ok {
-		tombstone, ok := obj.(client.ObjectKey)
+		// When the informer's store has evicted the object, OnDelete receives a DeletedFinalStateUnknown
+		tombstone, ok := obj.(kcache.DeletedFinalStateUnknown)
 		if !ok {
-			log.Error(fmt.Errorf("unexpected object type"), "Expected ConfigMap or tombstone", "got", obj)
+			log.Error(fmt.Errorf("unexpected object type"), "Expected ConfigMap or DeletedFinalStateUnknown", "got", obj)
 			return
 		}
-		log.Info("ConfigMap deleted (tombstone), keeping cached config", "key", tombstone)
-		return
+		cm, ok = tombstone.Obj.(*corev1.ConfigMap)
+		if !ok {
+			log.Error(fmt.Errorf("unexpected tombstone object type"), "Expected ConfigMap in tombstone", "got", tombstone.Obj)
+			return
+		}
+		log.Info("ConfigMap deleted (tombstone), retaining cached config", "name", cm.Name, "namespace", cm.Namespace)
 	}
 
 	if cm.Name != h.cmName || cm.Namespace != h.cmNamespace {
 		return
 	}
 
-	log.Info("ConfigMap deleted, retaining cached config", "name", cm.Name, "namespace", cm.Namespace)
+	log.Error(fmt.Errorf("ConfigMap deleted"), "Retaining last known config — this may indicate an operator error",
+		"name", cm.Name, "namespace", cm.Namespace)
 }

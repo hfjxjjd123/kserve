@@ -18,7 +18,6 @@ package cabundleconfigmap
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/pkg/errors"
@@ -31,10 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
 	"github.com/kserve/kserve/pkg/controller/configcache"
-	"github.com/kserve/kserve/pkg/types"
 )
 
 var log = logf.Log.WithName("CaBundleConfigMapReconciler")
@@ -55,18 +52,10 @@ func NewCaBundleConfigMapReconciler(client client.Client, clientset kubernetes.I
 
 func (c *CaBundleConfigMapReconciler) Reconcile(ctx context.Context, namespace string) error {
 	log.Info("Reconciling CaBundleConfigMap", "namespace", namespace)
-	isvcConfigMap, err := c.configCache.Get(ctx)
+	storageInitializerConfig, err := c.configCache.GetStorageInitializerConfig()
 	if err != nil {
-		log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
+		log.Error(err, "unable to get storage initializer config from cache")
 		return err
-	}
-
-	storageInitializerConfig := &types.StorageInitializerConfig{}
-	if storageInitializerConfigValue, ok := isvcConfigMap.Data["storageInitializer"]; ok {
-		err := json.Unmarshal([]byte(storageInitializerConfigValue), &storageInitializerConfig)
-		if err != nil {
-			return fmt.Errorf("unable to unmarshal storage initializer json string due to %w ", err)
-		}
 	}
 
 	var newCaBundleConfigMap *corev1.ConfigMap

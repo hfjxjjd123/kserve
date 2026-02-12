@@ -168,7 +168,15 @@ func main() {
 					Label: llmSvcCacheSelector,
 				},
 				&corev1.ConfigMap{}: {
-					Label: llmSvcCacheSelector,
+					// AllNamespaces: label-filtered for llmisvc-owned ConfigMaps (e.g. scheduler configs).
+					// KServeNamespace: unfiltered so the inferenceservice-config ConfigMap is visible
+					// to the shared informer used by ConfigCache for ongoing updates.
+					Namespaces: map[string]cache.Config{
+						cache.AllNamespaces: {
+							LabelSelector: llmSvcCacheSelector,
+						},
+						constants.KServeNamespace: {},
+					},
 				},
 				&appsv1.Deployment{}: {
 					Label: llmSvcCacheSelector,
@@ -284,21 +292,10 @@ func wellKnownConfigChecker(name string) bool {
 // validateLLMISVCConfig validates a v1alpha2 LLMInferenceServiceConfig by loading the controller
 // config and validating the template variables.
 func validateLLMISVCConfig(ctx context.Context, cache configcache.ConfigCache, config *v1alpha2.LLMInferenceServiceConfig) error {
-	// Load config from cache instead of API server
-	ingressConfig, err := cache.GetIngressConfig()
+	cfg, err := llmisvc.LoadConfigFromCache(ctx, cache)
 	if err != nil {
 		return err
 	}
-	storageInitializerConfig, err := cache.GetStorageInitializerConfig()
-	if err != nil {
-		return err
-	}
-	credentialConfig, err := cache.GetCredentialConfig()
-	if err != nil {
-		return err
-	}
-
-	cfg := llmisvc.NewConfig(ingressConfig, storageInitializerConfig, credentialConfig)
 	_, err = llmisvc.ReplaceVariables(llmisvc.LLMInferenceServiceSample(), config, cfg)
 	return err
 }

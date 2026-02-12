@@ -43,7 +43,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					IngressDomain:            "default.com",
 				}
 
-				dst := deepCopyIngressConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				*dst.IngressClassName = "traefik"
@@ -73,7 +73,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					},
 				}
 
-				dst := deepCopyDeployConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				dst.DefaultDeploymentMode = "RawDeployment"
@@ -96,7 +96,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					ServiceLabelDisallowedList:      []string{"label1", "label2"},
 				}
 
-				dst := deepCopyInferenceServicesConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				dst.ServiceAnnotationDisallowedList[0] = "modified"
@@ -122,7 +122,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					UidModelcar:   &uid,
 				}
 
-				dst := deepCopyStorageInitializerConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				dst.Image = "modified:latest"
@@ -152,7 +152,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					StorageSpecSecretName: "storage-secret",
 				}
 
-				dst := deepCopyCredentialConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				dst.S3.S3AccessKeyIDName = "modified-access-key"
@@ -183,7 +183,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					ReconcilationFrequencyInSecs: &freq,
 				}
 
-				dst := deepCopyLocalModelConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				*dst.FSGroup = 2000
@@ -209,7 +209,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					AutoMountServiceAccountToken: true,
 				}
 
-				dst := deepCopySecurityConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				dst.AutoMountServiceAccountToken = false
@@ -227,7 +227,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					ServiceClusterIPNone: true,
 				}
 
-				dst := deepCopyServiceConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				dst.ServiceClusterIPNone = false
@@ -245,7 +245,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					CustomGPUResourceTypeList: []string{"nvidia.com/gpu", "amd.com/gpu"},
 				}
 
-				dst := deepCopyMultiNodeConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				dst.CustomGPUResourceTypeList[0] = "modified.com/gpu"
@@ -268,7 +268,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					},
 				}
 
-				dst := deepCopyOtelCollectorConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				dst.ScrapeInterval = "60s"
@@ -291,7 +291,7 @@ func TestDeepCopyIsolation(t *testing.T) {
 					ScaleDownStabilizationWindowSeconds: "300",
 				}
 
-				dst := deepCopyAutoscalerConfig(src)
+				dst := src.DeepCopy()
 
 				// Modify the copy
 				dst.ScaleUpStabilizationWindowSeconds = "120"
@@ -314,198 +314,69 @@ func TestDeepCopyIsolation(t *testing.T) {
 // TestDeepCopyNilHandling verifies that deep copy functions handle nil inputs correctly
 func TestDeepCopyNilHandling(t *testing.T) {
 	t.Run("IngressConfig nil handling", func(t *testing.T) {
-		if result := deepCopyIngressConfig(nil); result != nil {
+		var src *v1beta1.IngressConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("DeployConfig nil handling", func(t *testing.T) {
-		if result := deepCopyDeployConfig(nil); result != nil {
+		var src *v1beta1.DeployConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("InferenceServicesConfig nil handling", func(t *testing.T) {
-		if result := deepCopyInferenceServicesConfig(nil); result != nil {
+		var src *v1beta1.InferenceServicesConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("StorageInitializerConfig nil handling", func(t *testing.T) {
-		if result := deepCopyStorageInitializerConfig(nil); result != nil {
+		var src *types.StorageInitializerConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("CredentialConfig nil handling", func(t *testing.T) {
-		if result := deepCopyCredentialConfig(nil); result != nil {
+		var src *credentials.CredentialConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("LocalModelConfig nil handling", func(t *testing.T) {
-		if result := deepCopyLocalModelConfig(nil); result != nil {
+		var src *v1beta1.LocalModelConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("SecurityConfig nil handling", func(t *testing.T) {
-		if result := deepCopySecurityConfig(nil); result != nil {
+		var src *v1beta1.SecurityConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("ServiceConfig nil handling", func(t *testing.T) {
-		if result := deepCopyServiceConfig(nil); result != nil {
+		var src *v1beta1.ServiceConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("MultiNodeConfig nil handling", func(t *testing.T) {
-		if result := deepCopyMultiNodeConfig(nil); result != nil {
+		var src *v1beta1.MultiNodeConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("OtelCollectorConfig nil handling", func(t *testing.T) {
-		if result := deepCopyOtelCollectorConfig(nil); result != nil {
+		var src *v1beta1.OtelCollectorConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
 		}
 	})
 	t.Run("AutoscalerConfig nil handling", func(t *testing.T) {
-		if result := deepCopyAutoscalerConfig(nil); result != nil {
+		var src *v1beta1.AutoscalerConfig
+		if result := src.DeepCopy(); result != nil {
 			t.Errorf("expected nil, got %v", result)
-		}
-	})
-}
-
-// TestJSONDeepCopy verifies the JSON-based deep copy helper function
-func TestJSONDeepCopy(t *testing.T) {
-	t.Run("successful copy", func(t *testing.T) {
-		src := &v1beta1.SecurityConfig{AutoMountServiceAccountToken: true}
-		dst := &v1beta1.SecurityConfig{}
-
-		err := jsonDeepCopy(src, dst)
-		if err != nil {
-			t.Errorf("jsonDeepCopy failed: %v", err)
-		}
-		if dst.AutoMountServiceAccountToken != true {
-			t.Errorf("jsonDeepCopy didn't copy field correctly: got %v, want true", dst.AutoMountServiceAccountToken)
-		}
-
-		dst.AutoMountServiceAccountToken = false
-		if src.AutoMountServiceAccountToken != true {
-			t.Errorf("jsonDeepCopy didn't provide isolation")
-		}
-	})
-
-	t.Run("nil source", func(t *testing.T) {
-		dst := &v1beta1.SecurityConfig{}
-		err := jsonDeepCopy(nil, dst)
-		if err == nil {
-			t.Errorf("jsonDeepCopy should return error for nil source")
-		}
-	})
-}
-
-// TestJSONDeepCopyHandlesComplexTypes verifies that JSON deep copy handles
-// complex types (pointers, slices, maps, nested structs).
-func TestJSONDeepCopyHandlesComplexTypes(t *testing.T) {
-	type FutureConfig struct {
-		SimpleField       bool
-		StringField       string
-		PointerField      *string
-		SliceField        []string
-		MapField          map[string]string
-		NestedStructField struct {
-			InnerPointer *int
-			InnerSlice   []string
-		}
-	}
-
-	t.Run("handles pointer fields", func(t *testing.T) {
-		pointerValue := "original"
-		src := &FutureConfig{
-			PointerField: &pointerValue,
-		}
-		dst := &FutureConfig{}
-
-		if err := jsonDeepCopy(src, dst); err != nil {
-			t.Fatalf("jsonDeepCopy failed: %v", err)
-		}
-
-		// Modifying dst must not affect src
-		*dst.PointerField = "modified"
-
-		if *src.PointerField != "original" {
-			t.Errorf("deep copy failed:Pointer field was shared! Original was modified: got %s, want original", *src.PointerField)
-		}
-	})
-
-	t.Run("handles slice fields", func(t *testing.T) {
-		src := &FutureConfig{
-			SliceField: []string{"item1", "item2", "item3"},
-		}
-		dst := &FutureConfig{}
-
-		if err := jsonDeepCopy(src, dst); err != nil {
-			t.Fatalf("jsonDeepCopy failed: %v", err)
-		}
-
-		// Modifying dst slice must not affect src
-		dst.SliceField[0] = "modified"
-		dst.SliceField = append(dst.SliceField, "new-item")
-
-		if src.SliceField[0] != "item1" {
-			t.Errorf("deep copy failed:Slice was shared! Original was modified: got %s, want item1", src.SliceField[0])
-		}
-		if len(src.SliceField) != 3 {
-			t.Errorf("deep copy failed:Slice was shared! Original length changed: got %d, want 3", len(src.SliceField))
-		}
-	})
-
-	t.Run("handles map fields", func(t *testing.T) {
-		src := &FutureConfig{
-			MapField: map[string]string{
-				"key1": "value1",
-				"key2": "value2",
-			},
-		}
-		dst := &FutureConfig{}
-
-		if err := jsonDeepCopy(src, dst); err != nil {
-			t.Fatalf("jsonDeepCopy failed: %v", err)
-		}
-
-		// Modifying dst map must not affect src
-		dst.MapField["key1"] = "modified"
-		dst.MapField["key3"] = "new-value"
-
-		if src.MapField["key1"] != "value1" {
-			t.Errorf("deep copy failed:Map was shared! Original was modified: got %s, want value1", src.MapField["key1"])
-		}
-		if _, exists := src.MapField["key3"]; exists {
-			t.Errorf("deep copy failed:Map was shared! New key appeared in original")
-		}
-	})
-
-	t.Run("handles nested structs with complex fields", func(t *testing.T) {
-		innerPointerValue := 42
-		src := &FutureConfig{
-			NestedStructField: struct {
-				InnerPointer *int
-				InnerSlice   []string
-			}{
-				InnerPointer: &innerPointerValue,
-				InnerSlice:   []string{"nested1", "nested2"},
-			},
-		}
-		dst := &FutureConfig{}
-
-		if err := jsonDeepCopy(src, dst); err != nil {
-			t.Fatalf("jsonDeepCopy failed: %v", err)
-		}
-
-		// Modifying nested fields must not affect src
-		*dst.NestedStructField.InnerPointer = 999
-		dst.NestedStructField.InnerSlice[0] = "modified"
-
-		if *src.NestedStructField.InnerPointer != 42 {
-			t.Errorf("deep copy failed:Nested pointer was shared! Original was modified: got %d, want 42", *src.NestedStructField.InnerPointer)
-		}
-		if src.NestedStructField.InnerSlice[0] != "nested1" {
-			t.Errorf("deep copy failed:Nested slice was shared! Original was modified: got %s, want nested1", src.NestedStructField.InnerSlice[0])
 		}
 	})
 }
@@ -513,20 +384,16 @@ func TestJSONDeepCopyHandlesComplexTypes(t *testing.T) {
 // TestShallowCopyRegression verifies that deep copy functions return new pointers, not shallow copies.
 func TestShallowCopyRegression(t *testing.T) {
 	t.Run("SecurityConfig is not shallow copied", func(t *testing.T) {
-		// Create a config that WOULD have a problem with shallow copy if it had pointers
 		src := &v1beta1.SecurityConfig{
 			AutoMountServiceAccountToken: true,
 		}
 
-		dst := deepCopySecurityConfig(src)
+		dst := src.DeepCopy()
 
-		// This test verifies we get different memory addresses
-		// If shallow copied, dst == src (same pointer)
 		if dst == src {
-			t.Errorf("deep copy failed:deepCopySecurityConfig returned same pointer (shallow copy)!")
+			t.Errorf("deep copy failed:DeepCopy returned same pointer (shallow copy)!")
 		}
 
-		// Verify we can modify dst without affecting src
 		dst.AutoMountServiceAccountToken = false
 		if src.AutoMountServiceAccountToken != true {
 			t.Errorf("SecurityConfig isolation failed")
@@ -538,10 +405,10 @@ func TestShallowCopyRegression(t *testing.T) {
 			ServiceClusterIPNone: true,
 		}
 
-		dst := deepCopyServiceConfig(src)
+		dst := src.DeepCopy()
 
 		if dst == src {
-			t.Errorf("deep copy failed:deepCopyServiceConfig returned same pointer (shallow copy)!")
+			t.Errorf("deep copy failed:DeepCopy returned same pointer (shallow copy)!")
 		}
 
 		dst.ServiceClusterIPNone = false
@@ -557,10 +424,10 @@ func TestShallowCopyRegression(t *testing.T) {
 			},
 		}
 
-		dst := deepCopyCredentialConfig(src)
+		dst := src.DeepCopy()
 
 		if dst == src {
-			t.Errorf("deep copy failed:deepCopyCredentialConfig returned same pointer (shallow copy)!")
+			t.Errorf("deep copy failed:DeepCopy returned same pointer (shallow copy)!")
 		}
 
 		// Critical: verify nested struct is also deep copied
@@ -571,7 +438,7 @@ func TestShallowCopyRegression(t *testing.T) {
 	})
 }
 
-// TestDeepCopyMethodVerification verifies the generated DeepCopy methods work correctly.
+// TestDeepCopyMethodVerification verifies the DeepCopy methods work correctly.
 func TestDeepCopyMethodVerification(t *testing.T) {
 	t.Run("OtelCollectorConfig isolation", func(t *testing.T) {
 		src := &v1beta1.OtelCollectorConfig{
@@ -581,7 +448,7 @@ func TestDeepCopyMethodVerification(t *testing.T) {
 			},
 		}
 
-		dst := deepCopyOtelCollectorConfig(src)
+		dst := src.DeepCopy()
 
 		dst.Resource.CPULimit = "2"
 		if src.Resource.CPULimit != "1" {
@@ -589,7 +456,7 @@ func TestDeepCopyMethodVerification(t *testing.T) {
 		}
 
 		if dst == src {
-			t.Errorf("deepCopyOtelCollectorConfig returned same pointer")
+			t.Errorf("DeepCopy returned same pointer")
 		}
 	})
 
@@ -598,7 +465,7 @@ func TestDeepCopyMethodVerification(t *testing.T) {
 			ScaleUpStabilizationWindowSeconds: "60",
 		}
 
-		dst := deepCopyAutoscalerConfig(src)
+		dst := src.DeepCopy()
 
 		dst.ScaleUpStabilizationWindowSeconds = "120"
 		if src.ScaleUpStabilizationWindowSeconds != "60" {
@@ -606,7 +473,7 @@ func TestDeepCopyMethodVerification(t *testing.T) {
 		}
 
 		if dst == src {
-			t.Errorf("deepCopyAutoscalerConfig returned same pointer")
+			t.Errorf("DeepCopy returned same pointer")
 		}
 	})
 }

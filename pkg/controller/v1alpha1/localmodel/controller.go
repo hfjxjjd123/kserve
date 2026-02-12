@@ -236,14 +236,9 @@ func (c *LocalModelReconciler) ReconcileForIsvcs(ctx context.Context, localModel
 // Step 4 - Creates PV & PVCs for namespaces with isvcs using this cached model
 func (c *LocalModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	c.Log.Info("Reconciling localmodel", "name", req.Name)
-	isvcConfigMap, err := c.ConfigCache.Get(ctx)
+	localModelConfig, err := c.ConfigCache.GetLocalModelConfig()
 	if err != nil {
-		c.Log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
-		return reconcile.Result{}, err
-	}
-	localModelConfig, err := v1beta1.NewLocalModelConfig(isvcConfigMap)
-	if err != nil {
-		c.Log.Error(err, "Failed to get local model config")
+		c.Log.Error(err, "Failed to get local model config from cache")
 		return reconcile.Result{}, err
 	}
 
@@ -394,12 +389,7 @@ func (c *LocalModelReconciler) localmodelNodeFunc(ctx context.Context, obj clien
 }
 
 func (c *LocalModelReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	isvcConfigMap, err := c.ConfigCache.Get(context.Background())
-	if err != nil {
-		c.Log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
-		return err
-	}
-	localModelConfig, err := v1beta1.NewLocalModelConfig(isvcConfigMap)
+	localModelConfig, err := c.ConfigCache.GetLocalModelConfig()
 	if err != nil {
 		c.Log.Error(err, "Failed to get local model config during controller manager setup")
 		return err

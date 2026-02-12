@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -46,9 +45,8 @@ func TestNewKedaReconciler(t *testing.T) {
 		MinReplicas: ptr.To(int32(1)),
 		MaxReplicas: 3,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, configMap)
+	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, r)
 	assert.Equal(t, "test-component", r.ScaledObject.Name)
@@ -61,9 +59,8 @@ func TestGetKedaMetrics_ResourceMetricSourceType(t *testing.T) {
 		Namespace: "test-namespace",
 	}
 	componentExt := createComponentExtensionWithResourceMetric()
-	configMap := &corev1.ConfigMap{}
 
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "cpu", triggers[0].Type)
@@ -76,9 +73,8 @@ func TestGetKedaMetrics_ExternalMetricSourceType(t *testing.T) {
 		Namespace: "test-namespace",
 	}
 	componentExt := createComponentExtensionWithExternalMetric()
-	configMap := &corev1.ConfigMap{}
 
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "prometheus", triggers[0].Type)
@@ -93,9 +89,8 @@ func TestGetKedaMetrics_PodMetricSourceType(t *testing.T) {
 		Namespace: "test-namespace",
 	}
 	componentExt := createComponentExtensionWithPodMetric()
-	configMap := &corev1.ConfigMap{}
 
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "external", triggers[0].Type)
@@ -114,9 +109,8 @@ func TestCreateKedaScaledObject(t *testing.T) {
 		MinReplicas: ptr.To(int32(1)),
 		MaxReplicas: 3,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, configMap)
+	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, scaledObject)
 	assert.Equal(t, "test-component", scaledObject.Name)
@@ -146,9 +140,8 @@ func TestReconcile(t *testing.T) {
 		MinReplicas: ptr.To(int32(1)),
 		MaxReplicas: 3,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, configMap)
+	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 
 	err = r.Reconcile(t.Context())
@@ -171,12 +164,11 @@ func TestSetControllerReferences(t *testing.T) {
 		MinReplicas: ptr.To(int32(1)),
 		MaxReplicas: 3,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, configMap)
+	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 
-	owner := &corev1.ConfigMap{
+	owner := &kedav1alpha1.ScaledObject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "owner",
 			Namespace: "test-namespace",
@@ -198,9 +190,8 @@ func TestReconcile_CreateScaledObject(t *testing.T) {
 		MinReplicas: ptr.To(int32(1)),
 		MaxReplicas: 3,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, configMap)
+	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 
 	err = r.Reconcile(t.Context())
@@ -226,9 +217,8 @@ func TestReconcile_UpdateScaledObject(t *testing.T) {
 		MinReplicas: ptr.To(int32(1)),
 		MaxReplicas: 3,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, configMap)
+	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 
 	// Create an existing ScaledObject with different MaxReplicaCount
@@ -276,9 +266,8 @@ func TestGetKedaMetrics_AverageValueMetricSourceType(t *testing.T) {
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
 
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "cpu", triggers[0].Type)
@@ -306,9 +295,8 @@ func TestGetKedaMetrics_ValueMetricSourceType(t *testing.T) {
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
 
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "memory", triggers[0].Type)
@@ -335,9 +323,8 @@ func TestGetKedaMetrics_DefaultCPUUtilization(t *testing.T) {
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
 
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "cpu", triggers[0].Type)
@@ -355,9 +342,8 @@ func TestReconcile_HandleGetError(t *testing.T) {
 		MinReplicas: ptr.To(int32(1)),
 		MaxReplicas: 3,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, configMap)
+	r, err := NewKedaReconciler(client, scheme.Scheme, componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 
 	// Simulate a client error by using an invalid name for the ScaledObject
@@ -375,9 +361,8 @@ func TestCreateKedaScaledObject_DefaultMinReplicas(t *testing.T) {
 	componentExt := &v1beta1.ComponentExtensionSpec{
 		MaxReplicas: 3,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, configMap)
+	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, scaledObject)
 	assert.Equal(t, "test-component", scaledObject.Name)
@@ -395,9 +380,8 @@ func TestCreateKedaScaledObject_MaxReplicasLessThanMinReplicas(t *testing.T) {
 		MinReplicas: ptr.To(int32(5)),
 		MaxReplicas: 3,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, configMap)
+	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, scaledObject)
 	assert.Equal(t, "test-component", scaledObject.Name)
@@ -414,9 +398,8 @@ func TestGetKedaMetrics_NilAutoScaling(t *testing.T) {
 	componentExt := &v1beta1.ComponentExtensionSpec{
 		AutoScaling: nil,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Empty(t, triggers)
 }
@@ -442,8 +425,7 @@ func TestGetKedaMetrics_ResourceMetricSourceType_Utilization(t *testing.T) {
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "cpu", triggers[0].Type)
@@ -470,8 +452,7 @@ func TestGetKedaMetrics_ResourceMetricSourceType_Utilization_DefaultCPU(t *testi
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "cpu", triggers[0].Type)
@@ -499,8 +480,7 @@ func TestGetKedaMetrics_ResourceMetricSourceType_AverageValue(t *testing.T) {
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "memory", triggers[0].Type)
@@ -528,8 +508,7 @@ func TestGetKedaMetrics_ResourceMetricSourceType_Value(t *testing.T) {
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	assert.Equal(t, "memory", triggers[0].Type)
@@ -567,8 +546,7 @@ func TestGetKedaMetrics_ExternalMetricSourceType_WithNamespaceAndAuth(t *testing
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	trigger := triggers[0]
@@ -606,8 +584,7 @@ func TestGetKedaMetrics_ExternalMetricSourceType_WithoutNamespaceOrAuth(t *testi
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	trigger := triggers[0]
@@ -643,8 +620,7 @@ func TestGetKedaMetrics_PodMetricSourceType_Success(t *testing.T) {
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
-	triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+	triggers, err := getKedaMetrics(componentMeta, componentExt, nil)
 	require.NoError(t, err)
 	assert.Len(t, triggers, 1)
 	trigger := triggers[0]
@@ -666,9 +642,8 @@ func TestCreateKedaScaledObject_SetsBasicFields(t *testing.T) {
 		MinReplicas: ptr.To(int32(2)),
 		MaxReplicas: 5,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, configMap)
+	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "basic-component", scaledObject.Name)
 	assert.Equal(t, "basic-namespace", scaledObject.Namespace)
@@ -685,9 +660,8 @@ func TestCreateKedaScaledObject_SetsTriggers(t *testing.T) {
 		Namespace: "trigger-namespace",
 	}
 	componentExt := createComponentExtensionWithResourceMetric()
-	configMap := &corev1.ConfigMap{}
 
-	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, configMap)
+	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 	assert.Len(t, scaledObject.Spec.Triggers, 1)
 	assert.Equal(t, "cpu", scaledObject.Spec.Triggers[0].Type)
@@ -701,9 +675,8 @@ func TestCreateKedaScaledObject_UsesDefaultMinReplicas(t *testing.T) {
 	componentExt := &v1beta1.ComponentExtensionSpec{
 		MaxReplicas: 4,
 	}
-	configMap := &corev1.ConfigMap{}
 
-	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, configMap)
+	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, constants.DefaultMinReplicas, *scaledObject.Spec.MinReplicaCount)
 	assert.Equal(t, int32(4), *scaledObject.Spec.MaxReplicaCount)
@@ -730,9 +703,8 @@ func TestCreateKedaScaledObject_AdvancedConfigFromComponentExt(t *testing.T) {
 			},
 		},
 	}
-	configMap := &corev1.ConfigMap{}
 
-	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, configMap)
+	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, scaledObject.Spec.Advanced)
 	require.NotNil(t, scaledObject.Spec.Advanced.HorizontalPodAutoscalerConfig)
@@ -741,7 +713,7 @@ func TestCreateKedaScaledObject_AdvancedConfigFromComponentExt(t *testing.T) {
 	assert.Equal(t, &suWin, scaledObject.Spec.Advanced.HorizontalPodAutoscalerConfig.Behavior.ScaleUp.StabilizationWindowSeconds)
 }
 
-func TestCreateKedaScaledObject_AdvancedConfigFromConfigMap(t *testing.T) {
+func TestCreateKedaScaledObject_AdvancedConfigFromAutoscalerConfig(t *testing.T) {
 	componentMeta := metav1.ObjectMeta{
 		Name:      "from-cm",
 		Namespace: "ns",
@@ -751,16 +723,12 @@ func TestCreateKedaScaledObject_AdvancedConfigFromConfigMap(t *testing.T) {
 		MaxReplicas: 2,
 		AutoScaling: &v1beta1.AutoScalingSpec{},
 	}
-	configMap := &corev1.ConfigMap{
-		Data: map[string]string{
-			"autoscaler": `{
-				"scaleUpStabilizationWindowSeconds": "15",
-				"scaleDownStabilizationWindowSeconds": "45"
-			}`,
-		},
+	autoscalerConfig := &v1beta1.AutoscalerConfig{
+		ScaleUpStabilizationWindowSeconds:   "15",
+		ScaleDownStabilizationWindowSeconds: "45",
 	}
 
-	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, configMap)
+	scaledObject, err := createKedaScaledObject(componentMeta, componentExt, autoscalerConfig, nil)
 	require.NoError(t, err)
 	require.NotNil(t, scaledObject.Spec.Advanced)
 	require.NotNil(t, scaledObject.Spec.Advanced.HorizontalPodAutoscalerConfig)
@@ -938,13 +906,11 @@ func TestGetKedaMetrics_StringPreservation(t *testing.T) {
 				},
 			}
 
-			configMap := &corev1.ConfigMap{
-				Data: map[string]string{
-					"otelCollector": `{"endpoint": "http://otlp:4317"}`,
-				},
+			otelCollectorConfig := &v1beta1.OtelCollectorConfig{
+				MetricReceiverEndpoint: "http://otlp:4317",
 			}
 
-			triggers, err := getKedaMetrics(componentMeta, componentExt, configMap)
+			triggers, err := getKedaMetrics(componentMeta, componentExt, otelCollectorConfig)
 			require.NoError(t, err)
 			require.Len(t, triggers, 1)
 

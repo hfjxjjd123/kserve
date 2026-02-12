@@ -49,8 +49,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
-	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
-	"github.com/kserve/kserve/pkg/constants"
 	"github.com/kserve/kserve/pkg/controller/configcache"
 	"github.com/kserve/kserve/pkg/controller/v1alpha1/utils"
 )
@@ -429,14 +427,9 @@ func (c *LocalModelNodeReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// 3. Kick off download jobs for all models in spec
-	isvcConfigMap, err := c.ConfigCache.Get(ctx)
+	localModelConfig, err := c.ConfigCache.GetLocalModelConfig()
 	if err != nil {
-		c.Log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
-		return reconcile.Result{}, err
-	}
-	localModelConfig, err := v1beta1.NewLocalModelConfig(isvcConfigMap)
-	if err != nil {
-		c.Log.Error(err, "Failed to get local model config")
+		c.Log.Error(err, "Failed to get local model config from cache")
 		return reconcile.Result{}, err
 	}
 	jobNamespace = localModelConfig.JobNamespace

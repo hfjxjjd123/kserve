@@ -32,6 +32,8 @@ import (
 	kserveTypes "github.com/kserve/kserve/pkg/types"
 	"github.com/kserve/kserve/pkg/webhook/admission/pod"
 
+	"github.com/pkg/errors"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,12 +74,13 @@ func NewRawKubeReconciler(ctx context.Context,
 	storageContainerSpec *v1alpha1.StorageContainerSpec,
 	configCache configcache.ConfigCache,
 ) (*RawKubeReconciler, error) {
-	var otelCollector *otel.OtelReconciler
-	isvcConfigMap, err := configCache.Get(ctx)
+	// Get typed configs from cache instead of raw ConfigMap
+	otelCollectorConfig, err := configCache.GetOtelCollectorConfig()
 	if err != nil {
-		log.Error(err, "unable to get configmap from cache", "name", constants.InferenceServiceConfigMapName, "namespace", constants.KServeNamespace)
-		return nil, err
+		return nil, errors.Wrap(err, "failed to get OtelCollector config from cache")
 	}
+
+	var otelCollector *otel.OtelReconciler
 	// create OTel Collector if pod metrics is enabled for auto-scaling
 	if componentExt != nil && componentExt.AutoScaling != nil {
 		var metricNames []string
@@ -90,24 +93,26 @@ func NewRawKubeReconciler(ctx context.Context,
 			}
 		}
 		if len(metricNames) > 0 {
-			otelConfig, err := v1beta1.NewOtelCollectorConfig(isvcConfigMap)
-			if err != nil {
-				return nil, err
-			}
-			otelCollector, err = otel.NewOtelReconciler(client, scheme, componentMeta, metricNames, *otelConfig)
+			otelCollector, err = otel.NewOtelReconciler(client, scheme, componentMeta, metricNames, *otelCollectorConfig)
 			if err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	as, err := autoscaler.NewAutoscalerReconciler(client, scheme, componentMeta, componentExt, isvcConfigMap)
+	autoscalerConfig, err := configCache.GetAutoscalerConfig()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get Autoscaler config from cache")
+	}
+
+	as, err := autoscaler.NewAutoscalerReconciler(client, scheme, componentMeta, componentExt, autoscalerConfig, otelCollectorConfig)
 	if err != nil {
 		return nil, err
 	}
-	ingressConfig, err := v1beta1.NewIngressConfig(isvcConfigMap)
+
+	ingressConfig, err := configCache.GetIngressConfig()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to get Ingress config from cache")
 	}
 	url, err := createRawURL(ingressConfig, componentMeta)
 	if err != nil {
@@ -119,10 +124,10 @@ func NewRawKubeReconciler(ctx context.Context,
 		multiNodeEnabled = true
 	}
 
-	// do not return error as service config is optional
-	serviceConfig, err1 := v1beta1.NewServiceConfig(isvcConfigMap)
-	if err1 != nil {
-		log.Error(err1, "failed to get service config")
+	serviceConfig, err := configCache.GetServiceConfig()
+	if err != nil {
+		// do not return error as service config is optional
+		log.Error(err, "failed to get service config from cache")
 	}
 
 	if storageUris != nil && len(*storageUris) > 0 {
@@ -168,10 +173,10 @@ func NewRawKubeReconciler(ctx context.Context,
 		}
 	}
 
-	// Get deploy config
-	deployConfig, err := v1beta1.NewDeployConfig(isvcConfigMap)
+	// Get deploy config from cache
+	deployConfig, err := configCache.GetDeployConfig()
 	if err != nil {
-		log.Error(err, "failed to get deploy config")
+		log.Error(err, "failed to get deploy config from cache")
 		deployConfig = nil // Use nil if config is not available
 	}
 

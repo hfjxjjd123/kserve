@@ -73,7 +73,3 @@ docker-compose.yml
 
 # Istio installer downloaded by quick install
 istio-*
-
-CLAUDE.md
-ISSUE_configmap_caching.md
-.claude
